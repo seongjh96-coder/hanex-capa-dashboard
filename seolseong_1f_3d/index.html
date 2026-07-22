@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>설성센터 1F CAPA 도면 점유도</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="dashboard">
+    <header class="topbar">
+      <h1>센터 도면 점유도</h1>
+      <label>
+        센터 선택
+        <select id="centerSelect">
+          <option>설성센터</option>
+        </select>
+      </label>
+      <label>
+        층 선택
+        <select id="floorSelect">
+          <option>1층</option>
+        </select>
+      </label>
+      <button id="resetView" type="button">초기화</button>
+    </header>
+
+    <section class="layout">
+      <aside class="side-panel">
+        <div class="center-title">
+          <div>
+            <span id="centerName">설성센터</span>
+            <strong id="floorName">1층</strong>
+          </div>
+          <b id="statusBadge">정상</b>
+        </div>
+
+        <div class="kpi-grid">
+          <article>
+            <span>전체 보관 CAPA</span>
+            <strong id="totalCapa">-</strong>
+          </article>
+          <article>
+            <span>현재 사용 CAPA</span>
+            <strong id="usedCapa">-</strong>
+          </article>
+          <article>
+            <span>점유율</span>
+            <strong id="useRate">-</strong>
+          </article>
+        </div>
+
+        <div class="donut-row">
+          <canvas id="donutCanvas" width="92" height="92" aria-label="전체 CAPA 점유율"></canvas>
+          <div>
+            <p>랙 보관 기준</p>
+            <strong id="donutRate">-</strong>
+          </div>
+        </div>
+
+        <h2>영역별 상세 현황</h2>
+        <table class="mini-table">
+          <thead>
+            <tr><th>구분</th><th>CAPA</th><th>사용률</th></tr>
+          </thead>
+          <tbody id="zoneTable"></tbody>
+        </table>
+
+        <h2>CAPA 사용 추이</h2>
+        <canvas id="trendCanvas" width="320" height="160" aria-label="최근 7일 CAPA 사용 추이"></canvas>
+      </aside>
+
+      <section class="scene-panel">
+        <div class="cards">
+          <article class="metric blue">
+            <span>랙 보관 CAPA</span>
+            <strong id="rackCapa">-</strong>
+          </article>
+          <article class="metric gray">
+            <span>BULK 평치 CAPA</span>
+            <strong id="bulkCapa">-</strong>
+          </article>
+          <article class="metric gold">
+            <span>작업/기타 CAPA</span>
+            <strong id="workCapa">-</strong>
+          </article>
+        </div>
+
+        <div class="scene-wrap">
+          <canvas id="warehouseCanvas" width="1220" height="760" aria-label="설성센터 1층 창고 3D 도면"></canvas>
+          <div id="tooltip" class="tooltip" hidden></div>
+          <div class="control-help">랙 번호 클릭: 고객사·CAPA 상세 확인</div>
+        </div>
+      </section>
+
+      <aside class="right-panel">
+        <h2>뷰 컨트롤</h2>
+        <button class="tool" id="rotateView" type="button">기본 각도</button>
+        <button class="tool" id="zoomIn" type="button">확대</button>
+        <button class="tool" id="zoomOut" type="button">축소</button>
+
+        <h2>표시 옵션</h2>
+        <label class="check"><input id="showZones" type="checkbox" checked> 영역 구분</label>
+        <label class="check"><input id="showCapa" type="checkbox" checked> CAPA 라벨</label>
+        <label class="check"><input id="showVacancy" type="checkbox" checked> 공실 표현</label>
+
+        <div class="info-box" id="selectedInfo">
+          <span>현재 확인 영역 정보</span>
+          <strong>01번 랙</strong>
+          <p>01~16번 랙을 클릭하면 랙별 보관 고객사와 CAPA 상세가 표시됩니다.</p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="./rack-data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
