@@ -1,5 +1,7 @@
 const STORAGE_KEY = "hx-center-capa-v2";
 const LEGACY_STORAGE_KEY = "hx-center-capa-v1";
+const INITIAL_DATA_VERSION_KEY = "hx-center-capa-initial-version";
+const INITIAL_DATA_VERSION = "2026-07-23-backup-2";
 const ALL = "전체";
 const FLOORPLAN_COLS = 48;
 const FLOORPLAN_ROWS = 28;
@@ -25,6 +27,7 @@ const CENTER_IMAGES = {
   설성센터: "./assets/centers/seolseong.png",
   대월센터: "./assets/centers/daewol.jpeg",
   백암센터: "./assets/centers/baegam.png",
+  김해센터: "./assets/centers/gimhae.png",
 };
 const CENTER_MAP_POSITIONS = {
   남이천1센터: { x: 53.8, y: 34.6 },
@@ -90,6 +93,33 @@ const $ = (selector) => document.querySelector(selector);
 
 function loadState() {
   let saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+  const bundledState = window.HANEX_INITIAL_STATE;
+  let savedStateIsIncomplete = false;
+  if (saved && bundledState && location.protocol === "file:") {
+    try {
+      const savedState = JSON.parse(saved);
+      const missingCenter = bundledState.centers.some(
+        (center) => !savedState.centers?.includes(center),
+      );
+      const missingRecords =
+        Object.keys(savedState.records || {}).length < Object.keys(bundledState.records || {}).length;
+      savedStateIsIncomplete = missingCenter || missingRecords;
+    } catch {
+      savedStateIsIncomplete = true;
+    }
+  }
+  const shouldAdoptBundledState =
+    bundledState &&
+    (!saved ||
+      (location.protocol === "file:" &&
+        (localStorage.getItem(INITIAL_DATA_VERSION_KEY) !== INITIAL_DATA_VERSION ||
+          savedStateIsIncomplete)));
+
+  if (shouldAdoptBundledState) {
+    saved = JSON.stringify(bundledState);
+    localStorage.setItem(STORAGE_KEY, saved);
+    localStorage.setItem(INITIAL_DATA_VERSION_KEY, INITIAL_DATA_VERSION);
+  }
   if (!saved) {
     try {
       const request = new XMLHttpRequest();
