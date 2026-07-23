@@ -89,6 +89,8 @@ let kakaoMarkers = [];
 let kakaoCoverageCircles = [];
 let kakaoInfoWindow = null;
 let kakaoScriptLoading = false;
+let modalCenter = "";
+let modalFloor = "";
 const $ = (selector) => document.querySelector(selector);
 
 function loadState() {
@@ -539,7 +541,8 @@ function renderOverviewChart(centers) {
   $("#overviewChart").innerHTML = rows
     .map(
       (row) => `
-        <div class="overview-row">
+        <button class="overview-row center-summary-trigger" data-center="${row.center}" type="button"
+          aria-label="${row.center} 상세 현황 보기">
           <strong class="overview-center">${row.center}</strong>
           ${renderOverviewStackedBar(row)}
           <div class="overview-metrics">
@@ -547,10 +550,14 @@ function renderOverviewChart(centers) {
             <span><b>사용</b>${formatPlt(row.used)}</span>
             <span class="free-value"><b>여유</b>${formatPlt(row.free)}</span>
           </div>
-        </div>
+        </button>
       `,
     )
     .join("");
+
+  document.querySelectorAll(".center-summary-trigger").forEach((button) => {
+    button.addEventListener("click", () => openCenterDetailModal(button.dataset.center));
+  });
 }
 
 function renderOverviewStackedBar(row) {
@@ -2071,9 +2078,12 @@ function bindEvents() {
   });
   $("#closeFreeCapaModal").addEventListener("click", closeFreeCapaModal);
   $("#freeCapaBackdrop").addEventListener("click", closeFreeCapaModal);
+  $("#closeCenterDetailModal").addEventListener("click", closeCenterDetailModal);
+  $("#centerDetailBackdrop").addEventListener("click", closeCenterDetailModal);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeFreeCapaModal();
+      closeCenterDetailModal();
       closeMappingModal();
     }
   });
@@ -2200,6 +2210,174 @@ function openFreeCapaModal() {
 function closeFreeCapaModal() {
   $("#freeCapaModal").classList.remove("open");
   $("#freeCapaModal").setAttribute("aria-hidden", "true");
+}
+
+function openCenterDetailModal(center) {
+  modalCenter = center;
+  modalFloor = getCenterFloors(center)[0];
+  renderCenterDetailModal();
+  $("#centerDetailModal").classList.add("open");
+  $("#centerDetailModal").setAttribute("aria-hidden", "false");
+  $("#closeCenterDetailModal").focus();
+}
+
+function closeCenterDetailModal() {
+  $("#centerDetailModal").classList.remove("open");
+  $("#centerDetailModal").setAttribute("aria-hidden", "true");
+}
+
+function renderCenterDetailModal() {
+  const item = centerTotals(modalCenter);
+  const free = Math.max(item.capacity - item.used, 0);
+  const rate = percent(item.used, item.capacity);
+  const info = normalizeCenterInfo(modalCenter);
+  const shippers = aggregateShippers(item.shippers);
+  const totalShipperUsed = shippers.reduce((sum, shipper) => sum + shipper.used, 0);
+  const floors = getCenterFloors(modalCenter);
+  if (!floors.includes(modalFloor)) modalFloor = floors[0];
+  const plan =
+    state.floorplans[floorplanKey(modalCenter, modalFloor)] || { image: "", zones: [] };
+  const zones = (plan.zones || []).map((zone, index) => ({
+    ...zone,
+    color: zone.color || ZONE_COLORS[index % ZONE_COLORS.length],
+    cells: Array.isArray(zone.cells) ? zone.cells : [],
+    type: zone.type || (zone.cells?.length ? "cell" : "box"),
+  }));
+  const modalPlan = { ...plan, zones };
+  const aerialImage = CENTER_IMAGES[modalCenter];
+
+  $("#centerDetailModalTitle").textContent = `${modalCenter} 상세`;
+  $("#centerDetailModalBody").innerHTML = `
+    <div class="center-modal-kpis">
+      <article><span>전체 CAPA</span><strong>${formatPlt(item.capacity)}</strong></article>
+      <article><span>사용 CAPA</span><strong>${formatPlt(item.used)}</strong></article>
+      <article class="free"><span>여유 CAPA</span><strong>${formatPlt(free)}</strong></article>
+      <article><span>사용률</span><strong>${rate}%</strong></article>
+    </div>
+
+    <div class="center-modal-detail-grid">
+      <section class="center-modal-card">
+        <div class="center-modal-card-head">
+          <h3>센터 조감도</h3>
+        </div>
+        <div class="center-modal-aerial ${aerialImage ? "has-image" : ""}"
+          ${aerialImage ? `style="background-image:linear-gradient(180deg, rgba(20,33,58,.04), rgba(20,33,58,.76)),url('${aerialImage}')"` : ""}>
+          <div>
+            <strong>${modalCenter}</strong>
+            <span>${info.address || (aerialImage ? "센터 조감도 이미지 적용" : "센터 조감도 이미지 미등록")}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="center-modal-card">
+        <div class="center-modal-card-head"><h3>센터 CAPA 현황</h3></div>
+        <div class="category-summary">
+          ${Object.entries(state.majors)
+            .map(([major]) => {
+              const totals = centerTotals(modalCenter, major);
+              return `
+                <div class="category-stat">
+                  <div><strong>${major}</strong><span>사용 ${formatPlt(totals.used)} / 가능 ${formatPlt(totals.capacity)}</span></div>
+                  <b>${formatPlt(Math.max(totals.capacity - totals.used, 0))}</b>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+
+      <section class="center-modal-card">
+        <div class="center-modal-card-head"><h3>점유 고객사 현황</h3></div>
+        <div class="customer-bars">
+          ${
+            shippers
+              .slice(0, 8)
+              .map((shipper) => {
+                const share = percent(shipper.used, totalShipperUsed);
+                return `
+                  <div class="customer-bar">
+                    <div><strong>${shipper.name}</strong><span>${formatPlt(shipper.used)} · ${share}%</span></div>
+                    <div class="mini-track"><i style="width:${share}%"></i></div>
+                  </div>
+                `;
+              })
+              .join("") || `<div class="empty">화주사 점유 CAPA를 입력하면 표시됩니다.</div>`
+          }
+        </div>
+      </section>
+    </div>
+
+    <section class="center-modal-card center-modal-floorplan-card">
+      <div class="center-modal-card-head floorplan-modal-head">
+        <div>
+          <h3>센터 도면 점유도</h3>
+          <p>층별 고객사 점유 구역을 읽기 전용으로 확인합니다.</p>
+        </div>
+        <select id="centerModalFloorSelect" aria-label="상세 팝업 도면 층 선택">
+          ${floors.map((floor) => `<option value="${floor}" ${floor === modalFloor ? "selected" : ""}>${floor}</option>`).join("")}
+        </select>
+      </div>
+      <div class="center-modal-floorplan-layout">
+        <div class="floorplan-stage center-modal-floorplan">
+          ${modalPlan.image ? `<img src="${modalPlan.image}" alt="${modalCenter} ${modalFloor} 도면" />` : `<div class="floorplan-empty">등록된 ${modalFloor} 도면 이미지가 없습니다.</div>`}
+          <div class="cell-layer disabled">${renderReadOnlyFloorplanCells(modalPlan)}</div>
+          <div class="zone-layer disabled">${renderReadOnlyFloorplanZones(modalPlan)}</div>
+        </div>
+        <aside class="center-modal-zone-list">
+          <h3>점유 구역</h3>
+          ${
+            zones.length
+              ? zones
+                  .map(
+                    (zone) => `
+                      <div class="center-modal-zone-item">
+                        <i style="background:${zone.color}"></i>
+                        <div><strong>${zone.customer || "고객사"}</strong><span>${zone.name || "구역"}</span></div>
+                        <b>${formatPlt(zone.capa)}</b>
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<div class="empty">등록된 점유 구역이 없습니다.</div>`
+          }
+        </aside>
+      </div>
+    </section>
+  `;
+
+  $("#centerModalFloorSelect").addEventListener("change", (event) => {
+    modalFloor = event.target.value;
+    renderCenterDetailModal();
+  });
+}
+
+function renderReadOnlyFloorplanCells(plan) {
+  const zoneByCell = new Map();
+  plan.zones
+    .filter((zone) => zone.type !== "box")
+    .forEach((zone) => zone.cells.forEach((cell) => zoneByCell.set(String(cell), zone)));
+
+  return Array.from({ length: FLOORPLAN_COLS * FLOORPLAN_ROWS }, (_, index) => {
+    const zone = zoneByCell.get(String(index));
+    const style = zone
+      ? `--cell-color:${zone.color};--cell-bg:${hexToRgba(zone.color, 0.34)};`
+      : "";
+    return `<span class="floor-cell ${zone ? "painted" : ""}" style="${style}"></span>`;
+  }).join("");
+}
+
+function renderReadOnlyFloorplanZones(plan) {
+  return plan.zones
+    .filter((zone) => zone.type === "box")
+    .map(
+      (zone) => `
+        <div class="floor-zone" style="left:${zone.x}%;top:${zone.y}%;width:${zone.w}%;height:${zone.h}%;--zone-color:${zone.color};--zone-bg:${hexToRgba(zone.color, 0.26)};">
+          <strong>${zone.customer || "고객사"}</strong>
+          <span>${zone.name || "구역"} · ${formatPlt(zone.capa)}</span>
+        </div>
+      `,
+    )
+    .join("");
 }
 
 function seedDemoData() {
