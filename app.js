@@ -89,7 +89,17 @@ let kakaoScriptLoading = false;
 const $ = (selector) => document.querySelector(selector);
 
 function loadState() {
-  const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+  let saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (!saved) {
+    try {
+      const request = new XMLHttpRequest();
+      request.open("GET", "./hanex-capa-backup.json", false);
+      request.send(null);
+      if (request.status === 200 || request.status === 0) saved = request.responseText;
+    } catch {
+      // 정적 초기 데이터가 없거나 직접 파일로 연 경우 기본 샘플을 사용합니다.
+    }
+  }
   if (!saved) return structuredClone(defaultState);
   try {
     const parsed = JSON.parse(saved);
@@ -2238,7 +2248,7 @@ function renderAll() {
 }
 
 if (!localStorage.getItem(STORAGE_KEY)) {
-  seedDemoData();
+  if (!Object.keys(state.records).length) seedDemoData();
   saveState();
 }
 
