@@ -577,13 +577,36 @@ textarea {
   grid-template-columns: 136px minmax(0, 1fr) 430px;
   gap: 14px;
   align-items: center;
+  width: 100%;
   padding-bottom: 10px;
   border-bottom: 1px solid rgba(18, 53, 91, 0.1);
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .overview-row:last-child {
   padding-bottom: 0;
   border-bottom: 0;
+}
+
+.center-summary-trigger {
+  cursor: pointer;
+}
+
+.center-summary-trigger:hover {
+  background: #eef5fc;
+  box-shadow: 0 0 0 8px #eef5fc;
+}
+
+.center-summary-trigger:focus-visible {
+  outline: 3px solid rgba(47, 111, 159, 0.32);
+  outline-offset: 5px;
 }
 
 .overview-center {
@@ -2245,6 +2268,193 @@ label textarea {
   box-shadow: 0 28px 70px rgba(23, 32, 51, 0.24);
 }
 
+.center-detail-modal-panel {
+  width: min(1180px, 100%);
+  max-height: 94vh;
+}
+
+.center-detail-modal-body {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  background: #f4f7fb;
+}
+
+.center-modal-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.center-modal-kpis article {
+  display: grid;
+  gap: 5px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.center-modal-kpis article.free {
+  border-color: #efb9b6;
+  background: var(--capa-free-soft);
+}
+
+.center-modal-kpis span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.center-modal-kpis strong {
+  color: var(--capa-total);
+  font-size: 22px;
+}
+
+.center-modal-kpis article.free strong {
+  color: var(--capa-free-text);
+}
+
+.center-modal-detail-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 14px;
+}
+
+.center-modal-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.center-modal-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.center-modal-card-head h3,
+.center-modal-zone-list h3 {
+  margin: 0;
+}
+
+.center-modal-card-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.center-modal-aerial {
+  min-height: 240px;
+  display: flex;
+  align-items: end;
+  padding: 18px;
+  border-radius: 8px;
+  background: #e8edf3;
+  background-position: center;
+  background-size: cover;
+}
+
+.center-modal-aerial div {
+  display: grid;
+  gap: 5px;
+}
+
+.center-modal-aerial.has-image {
+  color: #fff;
+}
+
+.center-modal-aerial strong {
+  font-size: 20px;
+}
+
+.center-modal-aerial span {
+  font-size: 13px;
+}
+
+.floorplan-modal-head select {
+  min-width: 110px;
+}
+
+.center-modal-floorplan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 14px;
+}
+
+.center-modal-floorplan {
+  min-height: 390px;
+}
+
+.center-modal-floorplan > img {
+  width: 100%;
+  height: 100%;
+  min-height: 390px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.center-modal-floorplan .floor-cell {
+  cursor: default;
+}
+
+.center-modal-floorplan .floor-cell:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.center-modal-floorplan .floor-cell.painted:hover {
+  border-color: var(--cell-color, #2563eb);
+  background: var(--cell-bg, rgba(37, 99, 235, 0.34));
+}
+
+.center-modal-zone-list {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.center-modal-zone-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.center-modal-zone-item i {
+  width: 10px;
+  height: 100%;
+  min-height: 34px;
+  border-radius: 99px;
+}
+
+.center-modal-zone-item div {
+  display: grid;
+  gap: 2px;
+}
+
+.center-modal-zone-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.center-modal-zone-item b {
+  color: var(--capa-total);
+  font-size: 13px;
+}
+
 #mappingModal {
   padding: 2px;
 }
@@ -2348,6 +2558,8 @@ label textarea {
   .kpi-grid,
   .panel-grid,
   .detail-grid,
+  .center-modal-detail-grid,
+  .center-modal-floorplan-layout,
   .center-map-layout,
   .floorplan-layout,
   .entry-summary,
@@ -2355,6 +2567,10 @@ label textarea {
   .shipper-trend-summary,
   .manual-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .center-modal-floorplan-layout {
+    grid-template-columns: 1fr;
   }
 
 }
@@ -2408,6 +2624,11 @@ label textarea {
 
   .overview-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .center-modal-kpis,
+  .center-modal-detail-grid {
+    grid-template-columns: 1fr;
   }
 
   .trend-chart {

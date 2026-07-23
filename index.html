@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>한익스프레스 센터 CAPA 관리</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260723-4" />
   </head>
   <body>
     <div class="app-shell">
@@ -406,6 +406,20 @@
       </main>
     </div>
 
+    <div class="modal" id="centerDetailModal" aria-hidden="true">
+      <div class="modal-backdrop" id="centerDetailBackdrop"></div>
+      <section class="modal-panel center-detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby="centerDetailModalTitle">
+        <div class="modal-head">
+          <div>
+            <span>센터 상세 현황</span>
+            <h2 id="centerDetailModalTitle">센터 상세</h2>
+          </div>
+          <button class="ghost" id="closeCenterDetailModal" type="button">닫기</button>
+        </div>
+        <div class="center-detail-modal-body" id="centerDetailModalBody"></div>
+      </section>
+    </div>
+
     <div class="modal" id="freeCapaModal" aria-hidden="true">
       <div class="modal-backdrop" id="freeCapaBackdrop"></div>
       <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="freeCapaTitle">
@@ -451,7 +465,7 @@
       </section>
     </div>
 
-    <script src="./initial-data.js?v=20260723-3"></script>
-    <script src="./app.js?v=20260723-3"></script>
+    <script src="./initial-data.js?v=20260723-4"></script>
+    <script src="./app.js?v=20260723-4"></script>
   </body>
 </html>
