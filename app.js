@@ -26,6 +26,8 @@ const CENTER_IMAGES = {
   설성센터: "./assets/centers/seolseong.png",
   대월센터: "./assets/centers/daewol.jpeg",
   백암센터: "./assets/centers/baegam.png",
+  김해센터: "./assets/centers/gimhae.png",
+  화성센터: "./assets/centers/hwaseong.jpg",
 };
 // 센터별 기본 층 구성 (없으면 ["1F"])
 const DEFAULT_CENTER_FLOORS = {
@@ -335,6 +337,7 @@ const defaultState = {
     "설성센터",
     "대월센터",
     "백암센터",
+    "김해센터",
     "화성센터",
   ],
   majors: {
@@ -450,6 +453,10 @@ function ensureBaselineState() {
     state.centers.splice(insertIndex, 0, "이천데포");
     changed = true;
   }
+  if (!state.centers.includes("김해센터")) {
+    state.centers.push("김해센터");
+    changed = true;
+  }
   if (!state.centers.includes("화성센터")) {
     state.centers.push("화성센터");
     changed = true;
@@ -468,6 +475,14 @@ function ensureBaselineState() {
   }
   if (!Array.isArray(state.mailRecipients)) {
     state.mailRecipients = [];
+    changed = true;
+  }
+  if (!state.centerCapacities) {
+    state.centerCapacities = {};
+    changed = true;
+  }
+  if (!Object.prototype.hasOwnProperty.call(state.centerCapacities, "김해센터")) {
+    state.centerCapacities["김해센터"] = 8627;
     changed = true;
   }
   if (number(state.gaonShipperSeedVersion) < 1) {
@@ -605,6 +620,14 @@ function defaultCenterInfo(center) {
       address: "경기 용인시 처인구 백암면 덕평로 120",
       note: "수도권 동남부 보관 거점",
     },
+    김해센터: {
+      address: "경상남도 김해시 상동면 상동로 680-70",
+      note: "영남권 보관 거점",
+    },
+    화성센터: {
+      address: "경기도 화성시 양감면 초록로 103",
+      note: "경기 남부 보관 거점",
+    },
   };
   return {
     address: known[center]?.address || "",
@@ -622,6 +645,8 @@ function normalizeCenterInfo(center) {
   state.centerInfo[center] = {
     ...base,
     ...current,
+    address: current.address || base.address,
+    note: current.note || base.note,
     isHub: Boolean(current.isHub),
     coverageRadius: number(current.coverageRadius) || base.coverageRadius,
   };
