@@ -1937,7 +1937,7 @@ function dashboardMailHtml(detailCenter = mailingSelectedCenter, interactive = f
 }
 
 function dashboardLauncherHtml() {
-  const dashboardUrl = "http://localhost:5180/";
+  const dashboardUrl = "https://hanex-capa-dashboard.vercel.app/";
   return `<main style="min-height:70vh;display:grid;place-items:center;font-family:Arial,'Malgun Gothic',sans-serif;color:#17283d"><section style="width:min(520px,calc(100% - 32px));padding:34px;text-align:center;background:#ffffff;border:1px solid #d7e1ec;border-radius:14px;box-shadow:0 16px 42px rgba(18,53,91,.14)"><div style="margin:0 auto 18px;width:52px;height:52px;line-height:52px;border-radius:11px;background:#12355b;color:#ffffff;font-size:20px;font-weight:900">HX</div><h1 style="margin:0;color:#12355b;font-size:24px">센터 CAPA 대시보드</h1><p style="margin:12px 0 22px;color:#718096;font-size:13px;line-height:1.7">대시보드로 이동하고 있습니다.<br>자동으로 열리지 않으면 아래 버튼을 눌러주세요.</p><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#356b9f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800">대시보드 열기</a><p style="margin:18px 0 0;color:#9aa7b7;font-size:10px">${escapeHtml(dashboardUrl)}</p></section></main><script>window.location.replace(${JSON.stringify(dashboardUrl)});</script>`;
 }
 
