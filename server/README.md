@@ -149,6 +149,16 @@ py server\serve.py
 
 - `GET /api/mail/status`: 발송 설정 여부 확인(시크릿은 반환하지 않음)
 - `POST /api/mail/send`: `{to: [메일주소], subject, html, attachmentHtml, attachmentName}` 형식으로 HTML 본문과 별도의 HTML 첨부파일을 발송. 현재 화면은 대시보드 주소로 이동하는 바로가기 HTML을 전달함
+
+## Vercel 메일 발송
+
+Vercel에서는 로컬 Outlook COM 대신 `api/mail/` 서버리스 함수를 사용합니다. 아래 환경변수 중 한 공급자와 공통 발송 비밀번호를 설정합니다.
+
+- Gmail: `GMAIL_USER`, `GMAIL_APP_PASSWORD`
+- Microsoft Outlook Graph: `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MAIL_SENDER`
+- 공통 보안: `MAIL_SEND_PASSWORD`
+
+Gmail 앱 비밀번호는 Google 계정의 2단계 인증을 활성화한 뒤 생성합니다. `MAIL_SEND_PASSWORD`는 공개 사이트의 무단 발송을 막기 위해 사용자가 메일링 화면에서 입력하는 별도 비밀번호입니다.
 - 외부 접속을 허용할 때는 반드시 `APP_PASSWORD`와 HTTPS를 함께 사용한다.
 
 ### 인증
