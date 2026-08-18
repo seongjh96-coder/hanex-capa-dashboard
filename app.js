@@ -5561,6 +5561,8 @@ async function runGaonFetch(opts) {
       }
       // 세션이 끊겼으면 로그인 화면으로 되돌린다 (prompt 대신)
       if (!data.ok && data.needLogin) {
+        gaonCredentials = null;
+        gaonLoggedIn = false;
         await refreshGaonConnection();
         throw new Error("gaon 로그인이 필요합니다. 위에서 로그인 후 다시 실행하세요.");
       }

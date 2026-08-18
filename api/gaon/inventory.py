@@ -61,6 +61,8 @@ class handler(BaseHTTPRequestHandler):
                 "prefixes": summary["prefixes"],
                 "byCustomer": summary["byCustomer"],
             })
+        except json.JSONDecodeError:
+            self._json({"ok": False, "needLogin": False, "error": "올바른 JSON 요청이 아닙니다."}, 400)
         except Exception as error:
             message = str(error)
             need_login = "로그인" in message or "자격증명" in message
