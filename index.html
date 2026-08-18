@@ -3,8 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <title>한익스프레스 센터 CAPA 관리</title>
-    <link rel="stylesheet" href="./styles.css?v=20260723-4" />
+    <link rel="stylesheet" href="./styles.css?v=41" />
   </head>
   <body>
     <div class="app-shell">
@@ -17,28 +18,34 @@
           </div>
         </div>
 
+        <button type="button" class="sidebar-toggle" id="sidebarToggle" title="사이드바 접기 / 펼치기 (Ctrl+B)" aria-label="사이드바 접기">‹</button>
+
         <nav class="nav" aria-label="주요 메뉴">
-          <button class="nav-item active" data-view="dashboard">대시보드</button>
-          <button class="nav-item" data-view="entry">센터별 입력</button>
-          <button class="nav-item" data-view="shipper">화주사 분석</button>
-          <button class="nav-item" data-view="centers">마스터 관리</button>
-          <button class="nav-item" data-view="mapView">보완중</button>
-          <button class="nav-item" data-view="manual">매뉴얼</button>
+          <button class="nav-item active" data-view="dashboard" data-icon="📊" title="대시보드"><i>📊</i><span>대시보드</span></button>
+          <button class="nav-item" data-view="entry" data-icon="✏️" title="센터별 입력"><i>✏️</i><span>센터별 입력</span></button>
+          <button class="nav-item" data-view="shipper" data-icon="📈" title="화주사 분석"><i>📈</i><span>화주사 분석</span></button>
+          <button class="nav-item" data-view="centers" data-icon="🗂" title="마스터 관리"><i>🗂</i><span>마스터 관리</span></button>
+          <button class="nav-item" data-view="inventory" data-icon="📦" title="재고 관리"><i>📦</i><span>재고 관리</span></button>
+          <button class="nav-item" data-view="manual" data-icon="📖" title="매뉴얼"><i>📖</i><span>매뉴얼</span></button>
         </nav>
 
         <div class="sidebar-foot">
           <span>저장 방식</span>
           <strong>브라우저 자동 저장</strong>
+          <button type="button" class="sync-status" id="syncStatus" hidden title="클릭하면 작업자 이름을 바꿉니다">확인 중…</button>
+          <small class="build-tag" id="buildTag">배치 v–</small>
         </div>
       </aside>
 
       <main class="content">
+        <div class="sync-banner" id="syncBanner" hidden></div>
         <header class="topbar">
           <div>
             <h1>센터별 보관 CAPA 현황</h1>
-            <p>센터를 선택하면 해당 센터의 CAPA, 고객사 점유, 도면 점유 현황을 함께 확인합니다.</p>
+            <p>센터별 수기 입력 CAPA와 gaon 재고를 비교해 현재 화주사 점유 현황을 확인합니다.</p>
           </div>
           <div class="actions">
+            <button class="ghost" id="openMailingButton" type="button">✉ 메일링 전송</button>
             <button class="ghost" id="resetDemoButton" type="button">초기값 복원</button>
             <button class="primary" id="exportButton" type="button">CSV 내보내기</button>
           </div>
@@ -79,7 +86,7 @@
             <div class="panel-head">
               <div>
                 <h2>전체 센터 요약</h2>
-                <p class="panel-copy">센터별 전체 CAPA, 사용 CAPA, 여유 CAPA를 가로 막대로 비교합니다.</p>
+                <p class="panel-copy">센터 막대를 누르면 해당 센터의 화주사별 점유 CAPA가 아래에 표시됩니다.</p>
               </div>
               <div class="legend">
                 <span><i class="legend-capacity"></i>전체 CAPA</span>
@@ -91,22 +98,15 @@
           </section>
 
           <section class="center-detail" id="centerDetail">
-            <section class="panel compact-panel selector-panel">
-              <div class="panel-head">
-                <div>
-                  <h2>센터 선택</h2>
-                  <p class="panel-copy">아래 센터를 선택하면 상세 CAPA, 고객사 점유, 도면 점유도가 바뀝니다.</p>
-                </div>
-              </div>
-              <div class="center-slicer" id="centerSlicer"></div>
-            </section>
-
             <div class="detail-header">
               <div>
                 <span>선택 센터 상세</span>
                 <h2 id="detailCenterName">남이천1센터</h2>
               </div>
               <div class="detail-badges">
+                <button type="button" id="gaonFetch" class="file-button small gaon-btn">🔄 gaon 재고 갱신</button>
+                <button type="button" id="gaonShippers" class="file-button small">⚙ gaon 연동 설정</button>
+                <span class="save-status" id="inventoryStatus">재고 미연동</span>
                 <strong id="detailFreeBadge">여유 0 PLT</strong>
                 <span id="detailRateBadge">사용률 0%</span>
               </div>
@@ -135,82 +135,13 @@
 
               <section class="panel">
                 <div class="panel-head">
-                  <h3>점유 고객사 현황</h3>
+                  <h3>화주사별 gaon 재고 점유</h3>
                 </div>
                 <div class="customer-bars" id="detailCustomerBars"></div>
               </section>
             </div>
           </section>
 
-          <section class="panel floorplan-panel">
-            <div class="panel-head">
-              <div>
-                <h2>센터 도면 점유도</h2>
-                <p class="panel-copy">층별 도면 이미지를 업로드한 뒤 셀을 클릭하거나 드래그해서 고객사별 비정형 점유 구역을 표시합니다.</p>
-              </div>
-              <div class="actions">
-                <label class="file-button">
-                  도면 업로드
-                  <input id="floorplanUpload" type="file" accept="image/*" />
-                </label>
-                <select id="floorplanFloorSelect" aria-label="도면 층 선택"></select>
-                <button class="ghost" id="addFloorplanFloorButton" type="button">층 추가</button>
-                <button class="primary" id="addZoneButton" type="button">영역 추가</button>
-              </div>
-            </div>
-
-            <div class="floorplan-layout">
-              <div class="floorplan-stage" id="floorplanStage">
-                <div class="floorplan-empty" id="floorplanEmpty">
-                  센터 도면 이미지를 업로드하면 이곳에 표시됩니다.
-                </div>
-                <img id="floorplanImage" alt="선택 센터 도면" />
-                <div class="cell-layer" id="cellLayer"></div>
-                <div class="zone-layer" id="zoneLayer"></div>
-              </div>
-
-              <aside class="zone-editor">
-                <h3>선택 영역 편집</h3>
-                <p class="hint" id="floorplanModeHint">셀 편집은 도면 셀을 클릭하거나 드래그해 ㄴ자, ㅁ자 형태로 칠합니다. 박스 편집은 영역 박스를 드래그해 빠르게 지정합니다.</p>
-                <div class="mode-toggle editor-mode-toggle" role="group" aria-label="영역 지정 방식">
-                  <button class="active" id="cellModeButton" data-floorplan-mode="cell" type="button">셀로 지정</button>
-                  <button id="boxModeButton" data-floorplan-mode="box" type="button">박스로 지정</button>
-                </div>
-                <label>
-                  고객사
-                  <input id="zoneCustomerInput" type="text" placeholder="예: A고객사" />
-                </label>
-                <label>
-                  구역명
-                  <input id="zoneNameInput" type="text" placeholder="예: 1F 상온 A구역" />
-                </label>
-                <label>
-                  점유 CAPA
-                  <input id="zoneCapaInput" type="number" min="0" step="1" />
-                </label>
-                <div class="range-grid">
-                  <label>
-                    X
-                    <input id="zoneXInput" type="range" min="0" max="90" />
-                  </label>
-                  <label>
-                    Y
-                    <input id="zoneYInput" type="range" min="0" max="90" />
-                  </label>
-                  <label>
-                    너비
-                    <input id="zoneWInput" type="range" min="5" max="100" />
-                  </label>
-                  <label>
-                    높이
-                    <input id="zoneHInput" type="range" min="5" max="100" />
-                  </label>
-                </div>
-                <button class="ghost" id="clearZoneCellsButton" type="button">선택 영역 셀 초기화</button>
-                <button class="danger" id="deleteZoneButton" type="button">선택 영역 삭제</button>
-              </aside>
-            </div>
-          </section>
         </section>
 
         <section class="view" id="entry">
@@ -218,11 +149,14 @@
             <div class="panel-head">
               <div>
                 <h2>센터별 CAPA 입력</h2>
-                <p class="panel-copy">층별 가능 CAPA를 입력하고, 사용 CAPA는 하단 화주사별 CAPA 저장 시 자동 합산합니다.</p>
+                <p class="panel-copy">센터 총 CAPA와 층별 가능 CAPA를 입력합니다. 화주사별 사용 CAPA는 gaon 재고에서 자동 집계됩니다.</p>
               </div>
               <div class="entry-actions">
                 <select id="centerSelect" aria-label="입력할 센터 선택"></select>
                 <select id="floorSelect" aria-label="입력할 층 선택"></select>
+                <label class="center-total-input">센터 총 CAPA
+                  <input id="centerTotalCapacityInput" type="number" min="0" step="1" placeholder="예: 12,000" />
+                </label>
                 <button class="ghost" id="addFloorButton" type="button">층 추가</button>
                 <button class="primary" id="saveCapaEntryButton" type="button">센터 CAPA 저장</button>
                 <span class="save-status" id="capaSaveStatus">저장 대기</span>
@@ -232,7 +166,22 @@
             <div class="entry-summary" id="entrySummary"></div>
             <div class="capa-entry-table" id="capaEntryTable"></div>
 
-            <div class="shipper-editor">
+            <section class="center-shipper-master">
+              <div class="panel-head compact">
+                <div>
+                  <h3>센터별 gaon 화주 마스터</h3>
+                  <p class="panel-copy">화주코드와 화주명을 등록하면 선택 센터에 맵핑되고 gaon 조회 목록에 자동 반영됩니다.</p>
+                </div>
+                <form class="inline-form" id="centerShipperMasterForm">
+                  <input id="centerShipperCodeInput" type="text" placeholder="화주코드" required />
+                  <input id="centerShipperNameInput" type="text" placeholder="화주명" required />
+                  <button class="primary" type="submit">화주 등록</button>
+                </form>
+              </div>
+              <div class="center-shipper-master-list" id="centerShipperMasterList"></div>
+            </section>
+
+            <div class="shipper-editor" hidden aria-hidden="true">
               <div class="panel-head compact">
                 <div>
                   <h3>화주사별 CAPA 입력</h3>
@@ -343,29 +292,345 @@
           </section>
         </section>
 
-        <section class="view" id="mapView">
+        <section class="view" id="mapView" hidden aria-hidden="true">
+          <section class="panel twin-panel">
+            <div class="panel-head">
+              <div>
+                <h2>센터 점유도 3D 디지털 트윈</h2>
+                <p class="panel-copy">도면 점유도 데이터를 팔레트 랙으로 3D 시각화합니다. 색 = 고객사, 적재율(채워진 팔레트) = 점유 CAPA 비중. 드래그로 회전, 휠로 확대할 수 있습니다.</p>
+              </div>
+              <div class="twin-toolbar">
+                <div class="twin-modes twin-viewmode">
+                  <button class="twin-mode active" data-twin-view="view" type="button">3D 보기</button>
+                  <button class="twin-mode" data-twin-view="edit" type="button">랙 배치 편집</button>
+                </div>
+                <label class="twin-select">센터
+                  <select id="twinCenterSelect"></select>
+                </label>
+                <label class="twin-select">층
+                  <select id="twinFloorSelect"></select>
+                </label>
+                <div class="twin-modes" id="twinHeightModes">
+                  <button class="twin-mode active" data-twin-height="capa" type="button">적재율=CAPA</button>
+                  <button class="twin-mode" data-twin-height="flat" type="button">균일 적재</button>
+                </div>
+                <div class="twin-layers">
+                  <button class="twin-fs" id="twinLayerToggle" type="button" aria-expanded="false" title="3D에 표시할 요소와 이름표를 고릅니다">🧩 표시 요소</button>
+                  <div class="twin-layer-panel" id="twinLayerPanel" hidden>
+                    <div class="twin-layer-head"><span>요소</span><span>표시</span><span>이름</span></div>
+                    <div id="twinLayerRows"></div>
+                    <button class="ghost mini" id="twinLayerReset" type="button">기본값으로</button>
+                  </div>
+                </div>
+                <button class="twin-fs" id="twinLabelToggle" type="button" title="3D에 요소 이름 표시/숨김">🏷 이름 표시</button>
+                <button class="twin-fs" id="twinFullscreen" type="button" title="전체화면 (Esc로 종료)">⛶ 전체화면</button>
+              </div>
+            </div>
+
+            <div class="twin-stage" id="twinStage">
+              <div class="twin-canvas" id="twinCanvas"></div>
+              <div class="twin-hud twin-kpis">
+                <div class="twin-kpi"><span>전체 CAPA</span><strong id="twinTotal">–</strong></div>
+                <div class="twin-kpi use"><span>사용 CAPA</span><strong id="twinUsed">–</strong></div>
+                <div class="twin-kpi free"><span>여유 CAPA</span><strong id="twinFree">–</strong></div>
+                <div class="twin-kpi"><span>점유율</span><strong id="twinRate">–</strong></div>
+                <div class="twin-kpi rackcapa" title="랙 1칸(베이) × 1단 = 1 PLT, 평치/벌크는 면적(칸) × 적재단수 × 유효적재율 기준으로 도면 배치에서 계산한 보관 CAPA"><span>도면 기준 CAPA</span><strong id="twinRackCapa">–</strong></div>
+              </div>
+              <div class="twin-hud twin-breakdown" id="twinBreakdown"></div>
+              <div class="twin-hud twin-legend" id="twinLegend"></div>
+              <div class="twin-tooltip" id="twinTooltip"></div>
+              <div class="twin-empty" id="twinEmpty">
+                <strong>표시할 랙 배치가 없습니다</strong>
+                <span>‘랙 배치 편집’ 탭에서 도면 위에 실제 랙을 배치하면 여기에 3D로 표시됩니다. (배치가 없으면 도면 점유도로 대체 표시)</span>
+              </div>
+            </div>
+
+            <div class="rack-editor" id="rackEditor" hidden>
+              <div class="rack-editor-main">
+                <div class="rack-editor-bar">
+                  <div class="bg-adjust" title="도면(배경)을 확대·축소·이동해 내가 그린 랙에 맞춥니다. 랙 위치는 그대로 유지됩니다.">
+                    <button type="button" id="bgToggle" class="mini bg-toggle" title="배경 PDF 도면을 켜고 끕니다">도면 ON</button>
+                    <button type="button" id="bgAdjustToggle" class="ghost mini bg-fold" aria-expanded="false" title="도면 맞춤 도구 펼치기/접기">도면 맞춤 ▾</button>
+                    <div class="bg-adjust-body" id="bgAdjustBody" hidden>
+                      <button type="button" id="bgZoomOut" class="ghost mini">−</button>
+                      <input id="bgScale" type="range" min="20" max="400" step="2" value="100" />
+                      <button type="button" id="bgZoomIn" class="ghost mini">＋</button>
+                      <span class="bg-scale-val" id="bgScaleVal">가로 100% · 세로 100%</span>
+                      <span class="bg-nudge" title="가로 배율(좌우 늘이기)">
+                        <span class="bg-axis">가로</span>
+                        <button type="button" class="ghost mini" id="bgWminus">−</button>
+                        <button type="button" class="ghost mini" id="bgWplus">＋</button>
+                      </span>
+                      <span class="bg-nudge" title="세로 배율(상하 늘이기)">
+                        <span class="bg-axis">세로</span>
+                        <button type="button" class="ghost mini" id="bgHminus">−</button>
+                        <button type="button" class="ghost mini" id="bgHplus">＋</button>
+                      </span>
+                      <span class="bg-nudge" title="위치 이동(정밀)">
+                        <button type="button" class="ghost mini" data-bg-nudge="left">◀</button>
+                        <button type="button" class="ghost mini" data-bg-nudge="up">▲</button>
+                        <button type="button" class="ghost mini" data-bg-nudge="down">▼</button>
+                        <button type="button" class="ghost mini" data-bg-nudge="right">▶</button>
+                      </span>
+                      <button type="button" id="bgAuto" class="mini bg-auto">자동 맞춤</button>
+                      <button type="button" id="bgReset" class="ghost mini">초기화</button>
+                    </div>
+                    <button type="button" id="layoutToolsToggle" class="ghost mini bg-fold" aria-expanded="false" title="배치 백업·되돌리기 도구 펼치기/접기">배치 관리 ▾</button>
+                    <div class="layout-tools" id="layoutToolsBody" hidden>
+                      <button class="ghost mini" id="layoutUndoBackup" type="button" title="이 층 배치를 마지막 백업 상태로 되돌립니다">↩ 되돌리기</button>
+                      <button class="ghost mini" id="layoutReloadDefault" type="button" title="내장 기본 배치로 교체합니다(현재 배치는 백업)">기본 배치 불러오기</button>
+                      <button class="ghost mini" id="layoutExport" type="button" title="배치·도면을 파일로 저장(기기 이동·초기화 대비)">💾 백업 저장</button>
+                      <label class="ghost mini file-inline" title="백업 파일에서 배치를 복원합니다">📂 백업 불러오기
+                        <input id="layoutImport" type="file" accept=".json" />
+                      </label>
+                      <button class="mini danger-mini" id="rackClearAll" type="button" title="이 층의 모든 배치를 삭제합니다(확인 문구 입력 필요)">전체 삭제</button>
+                    </div>
+                  </div>
+                  <div class="edit-modes" id="editModes" role="group" aria-label="편집 모드">
+                    <button type="button" class="edit-mode" data-edit-mode="lock" title="보기만 — 아무것도 바뀌지 않습니다">🔒 고정</button>
+                    <button type="button" class="edit-mode" data-edit-mode="pick" title="클릭해서 선택하고 속성만 수정합니다 (이동·생성 안 됨)">✏️ 값편집</button>
+                    <button type="button" class="edit-mode active" data-edit-mode="move" title="요소를 끌어서 옮깁니다 (빈 곳을 끌어도 새로 만들어지지 않음)">✋ 이동</button>
+                    <button type="button" class="edit-mode" data-edit-mode="create" title="빈 곳을 끌면 새 요소를 만듭니다">➕ 생성</button>
+                  </div>
+                  <span class="rack-editor-hint" id="rackEditorHint"></span>
+                </div>
+                <div class="rack-type-picker" id="rackTypePicker"></div>
+                <div class="rack-stage" id="rackStage">
+                  <div class="rack-empty" id="rackEditorEmpty">도면을 업로드하면 이곳에 표시됩니다. 도면 없이도 격자 위에 배치할 수 있습니다.</div>
+                  <img id="rackFloorImage" alt="센터 도면" />
+                  <div class="rack-grid" id="rackGrid"></div>
+                  <div class="rack-layer" id="rackLayer"></div>
+                  <div class="rack-preview" id="rackPreview" hidden></div>
+                </div>
+              </div>
+              <aside class="rack-editor-side">
+                <div class="rack-side-head">
+                  <strong>배치된 랙</strong>
+                </div>
+                <div class="rack-capa-summary" id="rackCapaSummary" title="랙 1칸(베이) × 1단 = 1 PLT"></div>
+                <div class="rack-list" id="rackList"></div>
+                <div class="rack-form" id="rackForm" hidden>
+                  <h4 id="rackFormTitle">요소 속성</h4>
+                  <label>이름
+                    <input id="rackName" placeholder="예: A열 / 메인 사무실" />
+                  </label>
+                  <div id="rackOnlyFields">
+                    <label>고객사
+                      <input id="rackCustomer" list="rackCustomerList" placeholder="고객사명" />
+                      <datalist id="rackCustomerList"></datalist>
+                    </label>
+                    <label>보관 분류
+                      <select id="rackCat"></select>
+                    </label>
+                    <label>셀 접두 (존-랙열) <span class="rack-field-hint" id="rackPrefixHint"></span>
+                      <input id="rackCellPrefix" list="rackPrefixList" placeholder="예: 02-01 (재고 파일 연동 시)" />
+                      <datalist id="rackPrefixList"></datalist>
+                    </label>
+                    <label>단별 접두 예외 <span class="rack-field-hint">1단만 번호가 다를 때</span>
+                      <input id="rackPrefixByLevel" placeholder="예: 1=05-01" />
+                    </label>
+                    <label id="shelfFactorRow" hidden>PLT 환산계수 <span class="rack-field-hint" id="shelfPltHint"></span>
+                      <input id="shelfPltFactor" type="number" min="0" max="5" step="0.05" />
+                    </label>
+                    <div class="rack-form-row">
+                      <label>단수
+                        <input id="rackLevels" type="number" min="1" max="8" step="1" />
+                      </label>
+                      <label>베이(칸)
+                        <input id="rackLen" type="number" min="1" max="48" step="1" />
+                      </label>
+                    </div>
+                    <div class="rack-form-row">
+                      <label>방향
+                        <select id="rackDir">
+                          <option value="h">가로</option>
+                          <option value="v">세로</option>
+                        </select>
+                      </label>
+                      <label>점유 CAPA
+                        <input id="rackCapa" type="number" min="0" step="1" />
+                      </label>
+                    </div>
+                    <div class="rack-slots-row">보관 CAPA <strong id="rackSlots">–</strong></div>
+                    <label>적재율 <span id="rackFillVal">60%</span>
+                      <input id="rackFill" type="range" min="0" max="100" step="5" />
+                    </label>
+                  </div>
+                  <div id="wallOnlyFields" hidden>
+                    <div class="rack-form-row">
+                      <label>각도(°)
+                        <input id="wallDeg" type="number" step="1" min="-180" max="180" />
+                      </label>
+                      <label>길이(칸)
+                        <input id="wallLen" type="number" step="0.5" min="0.5" />
+                      </label>
+                    </div>
+                    <div class="rack-form-row">
+                      <label>두께(칸)
+                        <input id="wallTh" type="number" step="0.1" min="0.1" max="5" />
+                      </label>
+                      <label>높이(층)
+                        <input id="wallHeight" type="number" step="1" min="1" max="6" />
+                      </label>
+                    </div>
+                    <div class="rack-slots-row">
+                      <span id="wallPts">–</span>
+                      <button class="ghost mini" id="wallSnap45" type="button" title="가장 가까운 15도 배수로 각도를 맞춥니다">15° 스냅</button>
+                    </div>
+                    <label>색상
+                      <input id="wallColor" type="color" />
+                    </label>
+                  </div>
+                  <div id="bulkOnlyFields" hidden>
+                    <div class="rack-form-row">
+                      <label>가로(칸)
+                        <input id="bulkW" type="number" min="1" max="216" step="1" />
+                      </label>
+                      <label>세로(칸)
+                        <input id="bulkD" type="number" min="1" max="126" step="1" />
+                      </label>
+                    </div>
+                    <div class="rack-form-row">
+                      <label>적재 단수
+                        <input id="bulkStack" type="number" min="1" max="10" step="1" />
+                      </label>
+                      <label>유효 적재율(%)
+                        <input id="bulkRate" type="number" min="0" max="100" step="5" />
+                      </label>
+                    </div>
+                    <div class="rack-slots-row">보관 CAPA <strong id="bulkSlotsVal">–</strong></div>
+                    <label>보관 분류
+                      <select id="bulkCat"></select>
+                    </label>
+                    <label>화주사
+                      <input id="bulkCustomer" type="text" list="rackCustomerList" placeholder="비워두면 미지정" />
+                    </label>
+                    <label>색상
+                      <input id="bulkColor" type="color" />
+                    </label>
+                  </div>
+                  <div id="areaOnlyFields" hidden>
+                    <div class="rack-form-row">
+                      <label>가로(칸)
+                        <input id="areaW" type="number" min="1" max="48" step="1" />
+                      </label>
+                      <label>세로(칸)
+                        <input id="areaD" type="number" min="1" max="28" step="1" />
+                      </label>
+                    </div>
+                    <label id="areaHeightRow">높이(층)
+                      <input id="areaHeight" type="number" min="1" max="6" step="1" />
+                    </label>
+                    <label>색상
+                      <input id="areaColor" type="color" />
+                    </label>
+                  </div>
+                  <button class="ghost danger" id="rackDelete" type="button">이 요소 삭제</button>
+                </div>
+              </aside>
+            </div>
+
+            <div class="twin-photo" id="twinPhoto">
+              <div class="twin-photo-head">
+                <strong>재고 · 파일</strong>
+                <div class="twin-photo-uploads">
+                  <button type="button" id="photoPanelToggle" class="ghost mini bg-fold" aria-expanded="false" title="사진·도면 업로드와 미리보기 펼치기/접기">사진·도면 ▾</button>
+                </div>
+              </div>
+              <div id="photoPanelBody" hidden>
+                <div class="twin-photo-uploads">
+                  <label class="file-button small">도면 업로드(PDF/이미지)
+                    <input id="rackFloorplanUpload" type="file" accept=".pdf,image/*" />
+                  </label>
+                  <label class="file-button small">사진 업로드/변경
+                    <input id="twinPhotoUpload" type="file" accept="image/*" />
+                  </label>
+                  <label class="file-button small">재고 파일(xlsx)
+                    <input id="inventoryUpload" type="file" accept=".xlsx,.xls,.csv" />
+                  </label>
+                </div>
+              <div class="twin-thumbs">
+                  <button type="button" class="twin-thumb" id="twinPhotoThumb" title="센터 사진 크게 보기">
+                    <img id="twinPhotoImg" alt="센터 사진" />
+                    <span id="twinPhotoEmpty" class="twin-thumb-empty">센터 사진 없음</span>
+                    <em>센터 사진</em>
+                  </button>
+                  <button type="button" class="twin-thumb" id="twinPlanThumb" title="PDF 도면 크게 보기">
+                    <img id="twinPlanImg" alt="센터 도면" />
+                    <span id="twinPlanEmpty" class="twin-thumb-empty">도면 없음</span>
+                    <em>PDF 도면 <span id="twinPlanFloor"></span></em>
+                  </button>
+                </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="inventory">
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h2>보완중</h2>
-                <p class="panel-copy">카카오맵 기준으로 센터 위치와 거점 권역을 확인합니다.</p>
+                <h2>재고 관리 · 도면 맵핑 점검</h2>
+                <p class="panel-copy">gaon에서 불러온 셀별 재고를 도면의 랙과 대조합니다. 어떤 셀이 랙에 연결되지 않았는지, 어떤 랙이 비어 있는지 확인하고 바로 배정할 수 있습니다.</p>
               </div>
-              <div class="map-toolbar">
-                <div class="map-api-actions">
-                  <input id="kakaoApiKeyInput" type="password" placeholder="Kakao JavaScript 키 입력" aria-label="Kakao JavaScript 키" />
-                  <button class="primary" id="saveKakaoApiKeyButton" type="button">API 키 저장</button>
-                  <span class="save-status" id="kakaoMapStatus">키 미등록</span>
-                </div>
-                <div class="map-legend">
-                  <span><i class="center-dot"></i>센터</span>
-                  <span><i class="hub-dot"></i>거점센터</span>
-                  <span><i class="coverage-dot"></i>커버 권역</span>
-                </div>
+              <div class="inv-tools">
+                <label>센터
+                  <select id="invCenterSelect"></select>
+                </label>
+                <button class="ghost" id="invRefresh" type="button" title="gaon 연동 설정 열기">⚙ gaon 연동</button>
+                <button class="ghost" id="invExport" type="button" title="현재 탭 목록을 CSV로 내려받습니다">CSV 내보내기</button>
+                <span class="save-status" id="invSnapshot">재고 미연동</span>
               </div>
             </div>
-            <div class="center-map-layout">
-              <div class="center-map kakao-map" id="centerMap"></div>
-              <aside class="center-map-info" id="centerMapInfo"></aside>
+
+            <div class="inv-kpis" id="invKpis"></div>
+            <div class="inv-issues" id="invIssues"></div>
+
+            <div class="inv-tabs" role="tablist">
+              <button class="inv-tab active" data-inv-tab="cells" type="button">셀 목록</button>
+              <button class="inv-tab" data-inv-tab="prefixes" type="button">랙열(접두)별 맵핑</button>
+              <button class="inv-tab" data-inv-tab="racks" type="button">랙별 점유</button>
+              <button class="inv-tab" data-inv-tab="offbook" type="button">미전산재고</button>
+            </div>
+
+            <div class="inv-offbook-add" id="invOffbookAdd" hidden>
+              <label>층<select id="obFloor"></select></label>
+              <label>화주<input id="obCustomer" type="text" list="rackCustomerList" placeholder="화주사명" /></label>
+              <label>분류<select id="obCat"></select></label>
+              <label>수량(PLT)<input id="obPlt" type="number" min="0" step="0.5" placeholder="0" /></label>
+              <label>위치<input id="obArea" type="text" placeholder="랙열 접두 또는 구역명 (예: 02-01, 평치A)" /></label>
+              <label>사유<input id="obReason" type="text" placeholder="예: 입고 전산 미처리, 반품 대기" /></label>
+              <button class="primary" id="obAdd" type="button">+ 추가</button>
+            </div>
+
+            <div class="inv-filters" id="invFilters">
+              <label class="inv-search">
+                <input id="invSearch" type="search" placeholder="셀코드 · 화주 · 품목 검색" autocomplete="off" />
+              </label>
+              <label>상태
+                <select id="invStatusFilter">
+                  <option value="all">전체</option>
+                  <option value="mapped">맵핑됨</option>
+                  <option value="unmapped">미맵핑</option>
+                  <option value="overflow">범위 초과</option>
+                </select>
+              </label>
+              <label>화주
+                <select id="invCustomerFilter"><option value="">전체</option></select>
+              </label>
+              <label>층
+                <select id="invFloorFilter"><option value="">전체</option></select>
+              </label>
+              <span class="inv-result-count" id="invResultCount"></span>
+            </div>
+
+            <div class="inv-table-wrap">
+              <table class="inv-table" id="invTable">
+                <thead id="invHead"></thead>
+                <tbody id="invBody"></tbody>
+              </table>
+            </div>
+            <div class="inv-more">
+              <button class="ghost" id="invMore" type="button" hidden>더 보기</button>
             </div>
           </section>
         </section>
@@ -404,20 +669,6 @@
           </div>
         </section>
       </main>
-    </div>
-
-    <div class="modal" id="centerDetailModal" aria-hidden="true">
-      <div class="modal-backdrop" id="centerDetailBackdrop"></div>
-      <section class="modal-panel center-detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby="centerDetailModalTitle">
-        <div class="modal-head">
-          <div>
-            <span>센터 상세 현황</span>
-            <h2 id="centerDetailModalTitle">센터 상세</h2>
-          </div>
-          <button class="ghost" id="closeCenterDetailModal" type="button">닫기</button>
-        </div>
-        <div class="center-detail-modal-body" id="centerDetailModalBody"></div>
-      </section>
     </div>
 
     <div class="modal" id="freeCapaModal" aria-hidden="true">
@@ -465,7 +716,161 @@
       </section>
     </div>
 
-    <script src="./initial-data.js?v=20260723-4"></script>
-    <script src="./app.js?v=20260723-4"></script>
+    <div class="modal" id="gaonModal" aria-hidden="true">
+      <div class="modal-backdrop" id="gaonBackdrop"></div>
+      <section class="modal-panel gaon-panel" role="dialog" aria-modal="true" aria-labelledby="gaonTitle">
+        <div class="modal-head">
+          <div>
+            <span>WMS 연동</span>
+            <h2 id="gaonTitle">gaon 재고 연동</h2>
+          </div>
+          <div class="actions">
+            <button class="ghost" id="gaonRun" type="button">선택 화주 조회</button>
+            <button class="primary" id="gaonRunAll" type="button">전체 화주 조회</button>
+            <button class="ghost" id="gaonClose" type="button">닫기</button>
+          </div>
+        </div>
+
+        <div class="gaon-body">
+          <section class="gaon-block">
+            <header>
+              <h3>1. gaon 접속</h3>
+              <span class="gaon-conn" id="gaonConn">확인 중…</span>
+            </header>
+            <div class="gaon-login" id="gaonLoginForm">
+              <label>사번
+                <input id="gaonId" type="text" autocomplete="username" placeholder="예: 20190001" />
+              </label>
+              <label>비밀번호
+                <input id="gaonPw" type="password" autocomplete="current-password" placeholder="gaon 비밀번호" />
+              </label>
+              <button class="primary small" id="gaonLoginBtn" type="button">로그인</button>
+            </div>
+            <div class="gaon-logged" id="gaonLoggedRow" hidden>
+              <span id="gaonLoggedText">로그인됨</span>
+              <button class="ghost small" id="gaonLogoutBtn" type="button">로그아웃</button>
+            </div>
+            <p class="hint">비밀번호는 저장하지 않습니다. 로컬 중계 서버(<code>py server\serve.py</code>) 메모리에만 유지됩니다.</p>
+          </section>
+
+          <section class="gaon-block">
+            <header><h3>2. 조회 조건</h3></header>
+            <div class="gaon-row">
+              <label>센터
+                <input id="gaonCenterName" type="text" readonly />
+              </label>
+              <label>WMS 창고코드
+                <input id="gaonWarehouse" type="text" placeholder="예: 0000200" />
+              </label>
+              <label>기준일자
+                <input id="gaonDate" type="date" />
+              </label>
+            </div>
+          </section>
+
+          <section class="gaon-block">
+            <header>
+              <h3>3. 화주 목록</h3>
+              <div class="actions">
+                <span class="gaon-count" id="gaonShipperCount"></span>
+                <button class="ghost small" id="gaonSelectAll" type="button">전체 선택</button>
+                <button class="ghost small" id="gaonSelectNone" type="button">전체 해제</button>
+                <button class="ghost small" id="gaonBulk" type="button">일괄 붙여넣기</button>
+              </div>
+            </header>
+            <div class="gaon-shipper-head">
+              <span></span><span>화주코드</span><span>화주명</span><span>결과</span><span>개별</span><span></span>
+            </div>
+            <div class="gaon-shippers" id="gaonShipperList"></div>
+            <div class="gaon-add">
+              <input id="gaonNewCode" type="text" placeholder="화주코드 (예: 2155)" />
+              <input id="gaonNewName" type="text" placeholder="화주명" />
+              <button class="ghost small" id="gaonAddShipper" type="button">+ 추가</button>
+            </div>
+            <div class="gaon-bulk" id="gaonBulkBox" hidden>
+              <textarea id="gaonBulkText" rows="5" placeholder="한 줄에 하나씩:&#10;2151,바이오포트코리아&#10;2155,윌리엄그랜트앤선즈"></textarea>
+              <div class="actions">
+                <button class="primary small" id="gaonBulkApply" type="button">추가</button>
+                <button class="ghost small" id="gaonBulkCancel" type="button">취소</button>
+              </div>
+            </div>
+          </section>
+
+          <div class="gaon-progress" id="gaonProgress" hidden>
+            <div class="gaon-bar"><i id="gaonBar"></i></div>
+            <span id="gaonProgressText"></span>
+          </div>
+          <p class="gaon-msg" id="gaonMsg" hidden></p>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal" id="centerOccupancyModal" aria-hidden="true">
+      <div class="modal-backdrop" id="centerOccupancyBackdrop"></div>
+      <section class="modal-panel occupancy-panel" role="dialog" aria-modal="true" aria-labelledby="centerOccupancyTitle">
+        <div class="modal-head">
+          <div><span>센터 상세</span><h2 id="centerOccupancyTitle">화주 CAPA 점유 현황</h2></div>
+          <button class="ghost" id="centerOccupancyClose" type="button">닫기</button>
+        </div>
+        <div id="centerOccupancyBody"></div>
+      </section>
+    </div>
+
+    <div class="modal" id="mailingModal" aria-hidden="true">
+      <div class="modal-backdrop" id="mailingBackdrop"></div>
+      <section class="modal-panel mailing-panel" role="dialog" aria-modal="true" aria-labelledby="mailingTitle">
+        <div class="modal-head">
+          <div><span>대시보드 공유</span><h2 id="mailingTitle">메일링 전송</h2></div>
+          <button class="ghost" id="mailingClose" type="button">닫기</button>
+        </div>
+        <div class="mailing-layout">
+          <aside class="mailing-settings">
+            <h3>수신자 목록</h3>
+            <form class="mail-recipient-form" id="mailRecipientForm">
+              <input id="mailRecipientName" type="text" placeholder="이름/부서" />
+              <input id="mailRecipientEmail" type="email" placeholder="메일 주소" required />
+              <button class="primary small" type="submit">추가</button>
+            </form>
+            <div class="mail-recipient-list" id="mailRecipientList"></div>
+            <label class="mail-subject">메일 제목
+              <input id="mailSubject" type="text" />
+            </label>
+            <div class="mail-actions">
+              <button class="primary" id="sendMailNow" type="button">Outlook 메일 전송</button>
+              <button class="ghost" id="openMailComposer" type="button">메일 작성 화면 열기</button>
+              <button class="ghost" id="copyMailHtml" type="button">HTML 복사</button>
+              <button class="ghost" id="downloadMailHtml" type="button">HTML 보고서 저장</button>
+            </div>
+            <p class="save-status" id="mailingStatus">수신자를 선택하고 메일을 작성하세요.</p>
+          </aside>
+          <section class="mail-preview-wrap">
+            <h3>메일 본문 미리보기</h3>
+            <div class="mail-preview" id="mailPreview"></div>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <div class="sync-login" id="syncLogin" hidden>
+      <section class="sync-login-card" role="dialog" aria-modal="true" aria-labelledby="syncLoginTitle">
+        <span class="brand-mark">HX</span>
+        <h2 id="syncLoginTitle">센터 CAPA 관리</h2>
+        <p>공유 서버에 접속하려면 공통 암호를 입력하세요.</p>
+        <input id="syncLoginPw" type="password" autocomplete="current-password" placeholder="접속 암호" />
+        <button class="primary" id="syncLoginBtn" type="button">접속</button>
+        <p class="sync-login-error" id="syncLoginError" hidden></p>
+      </section>
+    </div>
+
+    <script src="./assets/vendor/three.min.js"></script>
+    <script src="./assets/vendor/OrbitControls.js"></script>
+    <script src="./assets/vendor/xlsx.full.min.js"></script>
+    <script src="./assets/vendor/pdf.min.js"></script>
+    <div class="img-modal" id="imgModal" hidden>
+      <button type="button" class="img-modal-close" id="imgModalClose" title="닫기 (Esc)">✕</button>
+      <figcaption id="imgModalCaption"></figcaption>
+      <img id="imgModalImg" alt="" />
+    </div>
+    <script src="./app.js?v=79"></script>
   </body>
 </html>
