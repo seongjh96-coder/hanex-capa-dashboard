@@ -5346,6 +5346,8 @@ function renderGaonShipperButton() {
 // prompt() 연쇄를 대체한다. 로그인·창고코드·화주 목록·조회를 한 화면에서 처리.
 let gaonBusy = false;
 let gaonLoggedIn = false;
+let gaonStateless = false;
+let gaonCredentials = null; // Vercel에서는 페이지 메모리에만 유지하며 저장소에는 기록하지 않는다.
 const gaonRowResult = {}; // 화주코드 → {ok, text}
 
 function gaonMsg(text, kind = "") {
@@ -5409,14 +5411,15 @@ async function refreshGaonConnection() {
   try {
     const res = await fetch("/api/gaon/status", { cache: "no-store" });
     const data = await res.json();
-    gaonLoggedIn = !!data.loggedIn;
+    gaonStateless = !!data.stateless;
+    gaonLoggedIn = gaonStateless ? !!gaonCredentials : !!data.loggedIn;
     if (conn) {
-      conn.textContent = data.loggedIn ? `로그인됨 · ${data.userId || ""}` : "로그인 필요";
-      conn.className = "gaon-conn " + (data.loggedIn ? "on" : "warn");
+      conn.textContent = gaonLoggedIn ? `로그인됨 · ${gaonCredentials?.id || data.userId || ""}` : "로그인 필요";
+      conn.className = "gaon-conn " + (gaonLoggedIn ? "on" : "warn");
     }
-    $("#gaonLoggedText").textContent = `gaon 로그인됨 · 사번 ${data.userId || state.gaonUserId || ""}`;
-    $("#gaonLoginForm").hidden = data.loggedIn;
-    $("#gaonLoggedRow").hidden = !data.loggedIn;
+    $("#gaonLoggedText").textContent = `gaon 로그인됨 · 사번 ${gaonCredentials?.id || data.userId || state.gaonUserId || ""}`;
+    $("#gaonLoginForm").hidden = gaonLoggedIn;
+    $("#gaonLoggedRow").hidden = !gaonLoggedIn;
   } catch {
     gaonLoggedIn = false;
     if (conn) {
@@ -5478,6 +5481,8 @@ async function gaonLoginFromModal() {
     });
     const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
     if (!data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    gaonStateless = !!data.stateless;
+    gaonCredentials = gaonStateless ? { id, pw, company: data.company || "100" } : null;
     state.gaonUserId = id; // 사번만 기억 (비밀번호는 저장하지 않음)
     saveState();
     $("#gaonPw").value = "";
@@ -5534,10 +5539,25 @@ async function runGaonFetch(opts) {
       const url = `/api/gaon/inventory?warehouse=${encodeURIComponent(wh)}&market=${encodeURIComponent(t.code)}&date=${ymd}`;
       let res, data;
       try {
-        res = await fetch(url);
+        res = gaonStateless
+          ? await fetch("/api/gaon/inventory", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: gaonCredentials?.id || "",
+                pw: gaonCredentials?.pw || "",
+                company: gaonCredentials?.company || "100",
+                warehouse: wh,
+                market: t.code,
+                date: ymd,
+              }),
+            })
+          : await fetch(url);
         data = await res.json().catch(() => ({ ok: false, error: `응답 오류 (HTTP ${res.status})` }));
       } catch (e) {
-        throw new Error("중계 서버에 연결할 수 없습니다 (py server\\serve.py 실행 필요)");
+        throw new Error(gaonStateless
+          ? "GAON 중계 API에 연결할 수 없습니다. 잠시 후 다시 시도하세요."
+          : "중계 서버에 연결할 수 없습니다 (py server\\serve.py 실행 필요)");
       }
       // 세션이 끊겼으면 로그인 화면으로 되돌린다 (prompt 대신)
       if (!data.ok && data.needLogin) {
@@ -5682,8 +5702,7 @@ async function fetchGaonInventory() {
   if (status) status.textContent = "gaon 연결 확인 중…";
   let loggedIn = false;
   try {
-    const res = await fetch("/api/gaon/status", { cache: "no-store" });
-    loggedIn = !!(await res.json()).loggedIn;
+    loggedIn = await refreshGaonConnection();
   } catch {
     loggedIn = false;
     if (status) status.textContent = "중계 서버가 꺼져 있습니다";
@@ -5713,6 +5732,8 @@ function bindGaonModal() {
     if (e.key === "Enter") gaonLoginFromModal();
   });
   $("#gaonLogoutBtn").addEventListener("click", async () => {
+    gaonCredentials = null;
+    gaonLoggedIn = false;
     await fetch("/api/gaon/logout").catch(() => {});
     await refreshGaonConnection();
     gaonMsg("로그아웃했습니다.");
