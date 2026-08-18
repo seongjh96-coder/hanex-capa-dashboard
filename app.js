@@ -1956,9 +1956,10 @@ async function openMailingModal() {
   $("#mailingModal").setAttribute("aria-hidden", "false");
   try {
     const data = await (await fetch("/api/mail/status", { cache: "no-store" })).json();
+    const provider = data.mode === "gmail" ? "Google Gmail" : data.mode === "graph" ? "Microsoft Outlook" : data.mode === "outlook-desktop" ? "Outlook 데스크톱 앱" : "메일 서비스";
     $("#mailingStatus").textContent = data.configured
-      ? `Outlook 직접 발송 준비됨 · ${data.mode === "outlook-desktop" ? "데스크톱 앱" : "Microsoft Graph"} · 발신 ${data.sender}`
-      : "Outlook 직접 발송 설정이 필요합니다. 메일 작성 화면 열기는 사용할 수 있습니다.";
+      ? `직접 발송 준비됨 · ${provider} · 발신 ${data.sender}`
+      : "Vercel 메일 계정과 발송 비밀번호 설정이 필요합니다. 메일 작성 화면 열기는 사용할 수 있습니다.";
   } catch {
     $("#mailingStatus").textContent = "메일 서버 상태를 확인할 수 없습니다.";
   }
@@ -3154,11 +3155,14 @@ function bindEvents() {
     }
     button.disabled = true;
     button.textContent = "전송 중…";
-    $("#mailingStatus").textContent = `${recipients.length}명에게 Outlook 메일을 전송하고 있습니다.`;
+    $("#mailingStatus").textContent = `${recipients.length}명에게 메일을 전송하고 있습니다.`;
     try {
       const response = await fetch("/api/mail/send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Mail-Password": $("#mailSendPassword")?.value || "",
+        },
         body: JSON.stringify({
           to: recipients.map((recipient) => recipient.email),
           subject: $("#mailSubject").value.trim(),
@@ -3174,7 +3178,7 @@ function bindEvents() {
       $("#mailingStatus").textContent = `전송 실패 · ${error.message}`;
     } finally {
       button.disabled = false;
-      button.textContent = "Outlook 메일 전송";
+      button.textContent = "메일 전송";
     }
   });
   $("#copyMailHtml")?.addEventListener("click", async () => {

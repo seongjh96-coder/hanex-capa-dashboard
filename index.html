@@ -835,8 +835,11 @@
             <label class="mail-subject">메일 제목
               <input id="mailSubject" type="text" />
             </label>
+            <label class="mail-subject">발송 비밀번호
+              <input id="mailSendPassword" type="password" autocomplete="current-password" placeholder="Vercel 메일 발송 비밀번호" />
+            </label>
             <div class="mail-actions">
-              <button class="primary" id="sendMailNow" type="button">Outlook 메일 전송</button>
+              <button class="primary" id="sendMailNow" type="button">메일 전송</button>
               <button class="ghost" id="openMailComposer" type="button">메일 작성 화면 열기</button>
               <button class="ghost" id="copyMailHtml" type="button">HTML 복사</button>
               <button class="ghost" id="downloadMailHtml" type="button">HTML 보고서 저장</button>
@@ -871,6 +874,6 @@
       <figcaption id="imgModalCaption"></figcaption>
       <img id="imgModalImg" alt="" />
     </div>
-    <script src="./app.js?v=80"></script>
+    <script src="./app.js?v=81"></script>
   </body>
 </html>
