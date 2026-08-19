@@ -1,2 +1,21 @@
-_dong_icheon_floorplan_extract/
+# 작업용 임시 폴더 (xlsx 압축 해제 결과물)
 _xlsx_extract_check/
+_dong_icheon_floorplan_extract/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+
+# gaon 연동 (자격증명/픽스처 유출 방지)
+server/_fixture_*.json
+.env
+__pycache__/
+*.pyc
+
+# 공유 저장소 (서버가 만드는 실데이터 — 저장소에 올리지 않는다)
+server/data/
+.desktop-venv/
+build/
+dist/
+*.spec

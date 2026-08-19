@@ -29,6 +29,20 @@ const CENTER_IMAGES = {
   김해센터: "./assets/centers/gimhae.png",
   화성센터: "./assets/centers/hwaseong.jpg",
 };
+const CENTER_CAPACITY_SEED_VERSION = 1;
+const DEFAULT_CENTER_CAPACITIES = {
+  남이천1센터: 20919,
+  남이천2센터: 47606,
+  동이천센터: 19529,
+  이천센터: 21745,
+  이천데포: 8359,
+  북이천센터: 17446,
+  설성센터: 15250,
+  대월센터: 13428,
+  백암센터: 7496,
+  김해센터: 8627,
+  화성센터: 0,
+};
 // 센터별 기본 층 구성 (없으면 ["1F"])
 const DEFAULT_CENTER_FLOORS = {
   남이천1센터: ["지하1층", "지상2층", "지상4층"],
@@ -360,6 +374,7 @@ const defaultState = {
   kakaoApiKey: "",
   offbook: {},
   centerCapacities: {},
+  centerCapacitySeedVersion: 0,
   gaonShipperSeedVersion: 0,
   mailRecipients: [],
 };
@@ -431,6 +446,7 @@ function loadState() {
       nami1DiagWalls: !!parsed.nami1DiagWalls,
       offbook: parsed.offbook || {},
       centerCapacities: parsed.centerCapacities || {},
+      centerCapacitySeedVersion: parsed.centerCapacitySeedVersion || 0,
       gaonShipperSeedVersion: parsed.gaonShipperSeedVersion || 0,
       mailRecipients: parsed.mailRecipients || [],
     };
@@ -479,6 +495,11 @@ function ensureBaselineState() {
   }
   if (!state.centerCapacities) {
     state.centerCapacities = {};
+    changed = true;
+  }
+  if (number(state.centerCapacitySeedVersion) < CENTER_CAPACITY_SEED_VERSION) {
+    Object.assign(state.centerCapacities, DEFAULT_CENTER_CAPACITIES);
+    state.centerCapacitySeedVersion = CENTER_CAPACITY_SEED_VERSION;
     changed = true;
   }
   if (!Object.prototype.hasOwnProperty.call(state.centerCapacities, "김해센터")) {
