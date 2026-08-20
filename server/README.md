@@ -133,6 +133,49 @@ Lightsail 콘솔의 **네트워킹 → 방화벽**에서 해당 포트를 열어
 
 ## API
 
+## Outlook HTML 메일 직접 발송
+
+Microsoft Entra ID에서 앱을 등록하고 Microsoft Graph의 **Application `Mail.Send`** 권한에 관리자 동의를 부여한 뒤 아래 환경변수를 설정한다. 비밀값은 코드나 브라우저에 저장하지 않는다.
+
+Windows localhost에서 클래식 Outlook이 실행 중이면 Graph 환경변수 없이 현재 로그인된 Outlook 계정으로 자동 발송한다. 끄려면 `OUTLOOK_DESKTOP_SEND=0`을 설정한다. 외부 접속 서버에서는 보안을 위해 이 폴백을 사용하지 않는다.
+
+```bat
+set MS_TENANT_ID=테넌트-ID
+set MS_CLIENT_ID=앱-클라이언트-ID
+set MS_CLIENT_SECRET=클라이언트-시크릿
+set MAIL_SENDER=발신메일주소@회사도메인
+py server\serve.py
+```
+
+- `GET /api/mail/status`: 발송 설정 여부 확인(시크릿은 반환하지 않음)
+- `POST /api/mail/send`: `{to: [메일주소], subject, html, attachmentHtml, attachmentName}` 형식으로 HTML 본문과 별도의 HTML 첨부파일을 발송. 현재 화면은 `http://localhost:5180/` 로컬 대시보드로 이동하는 바로가기 HTML을 전달함. 수신자 PC에서 로컬 서버가 실행 중이어야 열림
+
+## 센터 도면 파일 저장
+
+마스터 관리의 **센터 도면 마스터**에서 PDF/이미지를 등록하면 브라우저 `localStorage`에 Base64 이미지를 넣지 않고 `CAPA_DATA_DIR/floorplans/`에 이미지 파일로 저장한다. 앱 상태에는 `/api/floorplan/file/...` 주소만 남으므로 큰 도면으로 인한 브라우저 저장 용량 초과를 방지한다. 기존 Base64 도면은 화면의 **기존 도면 파일 저장 전환** 버튼으로 옮길 수 있다.
+
+- `POST /api/floorplan/upload`: `{center, floor, image}` 형식의 축소된 이미지 Data URL을 로컬 파일로 저장
+- `GET /api/floorplan/file/{filename}`: 저장된 도면 이미지 조회
+
+## CAPA 누적 이력
+
+메일 직접 발송이 성공하거나 누적 관리에서 수동 저장하면 센터별 CAPA와 화주별 PLT 합계를 `CAPA_DATA_DIR/capa-history.json`에 저장한다. 원본 GAON 셀은 복제하지 않으며 같은 날짜에 다시 저장하면 당일 최신본으로 갱신한다. 주차·월 비교는 기간 내 마지막 저장본을 사용한다.
+
+- `GET /api/history`: 서버에 저장된 누적 이력 조회
+- `POST /api/history/save`: `{snapshot}`을 기준일자별로 저장 또는 갱신
+- `POST /api/history/delete`: `{id}`에 해당하는 저장 이력 삭제
+
+## Vercel 메일 발송
+
+Vercel에서는 로컬 Outlook COM 대신 `api/mail/` 서버리스 함수를 사용합니다. 아래 환경변수 중 한 공급자와 공통 발송 비밀번호를 설정합니다.
+
+- Gmail: `GMAIL_USER`, `GMAIL_APP_PASSWORD`
+- Microsoft Outlook Graph: `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MAIL_SENDER`
+- 공통 보안: `MAIL_SEND_PASSWORD`
+
+Gmail 앱 비밀번호는 Google 계정의 2단계 인증을 활성화한 뒤 생성합니다. `MAIL_SEND_PASSWORD`는 공개 사이트의 무단 발송을 막기 위해 사용자가 메일링 화면에서 입력하는 별도 비밀번호입니다.
+- 외부 접속을 허용할 때는 반드시 `APP_PASSWORD`와 HTTPS를 함께 사용한다.
+
 ### 인증
 - `POST /api/auth/login` `{pw}` → 세션 쿠키 발급
 - `GET  /api/auth/status` → `{needPassword, authed}`

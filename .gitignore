@@ -15,3 +15,7 @@ __pycache__/
 
 # 공유 저장소 (서버가 만드는 실데이터 — 저장소에 올리지 않는다)
 server/data/
+.desktop-venv/
+build/
+dist/
+*.spec
