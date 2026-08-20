@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <title>한익스프레스 센터 CAPA 관리</title>
-    <link rel="stylesheet" href="./styles.css?v=41" />
+    <link rel="stylesheet" href="./styles.css?v=50" />
   </head>
   <body>
     <div class="app-shell">
@@ -24,6 +24,7 @@
           <button class="nav-item active" data-view="dashboard" data-icon="📊" title="대시보드"><i>📊</i><span>대시보드</span></button>
           <button class="nav-item" data-view="entry" data-icon="✏️" title="센터별 입력"><i>✏️</i><span>센터별 입력</span></button>
           <button class="nav-item" data-view="shipper" data-icon="📈" title="화주사 분석"><i>📈</i><span>화주사 분석</span></button>
+          <button class="nav-item" data-view="history" data-icon="🗓" title="누적 관리"><i>🗓</i><span>누적 관리</span></button>
           <button class="nav-item" data-view="centers" data-icon="🗂" title="마스터 관리"><i>🗂</i><span>마스터 관리</span></button>
           <button class="nav-item" data-view="inventory" data-icon="📦" title="재고 관리"><i>📦</i><span>재고 관리</span></button>
           <button class="nav-item" data-view="manual" data-icon="📖" title="매뉴얼"><i>📖</i><span>매뉴얼</span></button>
@@ -239,16 +240,86 @@
           </section>
         </section>
 
+        <section class="view" id="history">
+          <section class="panel history-panel">
+            <div class="panel-head">
+              <div>
+                <h2>CAPA 누적 관리</h2>
+                <p class="panel-copy">메일 직접 발송 완료 시 당일 현황이 자동 저장됩니다. 원본 셀 대신 센터·화주별 합계만 보관해 용량을 작게 유지합니다.</p>
+              </div>
+              <div class="history-head-actions">
+                <button class="primary" id="captureCapaSnapshot" type="button">현재 현황 저장</button>
+                <span class="save-status" id="historySaveStatus">저장 대기</span>
+              </div>
+            </div>
+            <div class="history-controls">
+              <label>비교 단위
+                <select id="historyUnit">
+                  <option value="snapshot">저장 일자</option>
+                  <option value="week" selected>주차</option>
+                  <option value="month">월</option>
+                </select>
+              </label>
+              <label>기준 기간
+                <select id="historyLeft"></select>
+              </label>
+              <span class="history-arrow">→</span>
+              <label>비교 기간
+                <select id="historyRight"></select>
+              </label>
+              <small>주차·월 비교는 해당 기간의 마지막 저장본 기준</small>
+            </div>
+            <div class="history-kpis" id="historyKpis"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><div><h2>센터별 CAPA 변화</h2><p class="panel-copy" id="historyCenterCaption">비교할 저장본을 선택하세요.</p></div></div>
+            <div class="history-table" id="historyCenterCompare"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><div><h2>화주사 보관 CAPA 증감 TOP 10</h2><p class="panel-copy">전 센터 합산 기준으로 변화가 큰 화주사를 표시합니다.</p></div></div>
+            <div class="history-table" id="historyShipperCompare"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><div><h2>저장 이력</h2><p class="panel-copy">하루에 여러 번 저장하면 같은 날짜의 최신 현황으로 갱신됩니다.</p></div></div>
+            <div class="snapshot-list" id="snapshotList"></div>
+          </section>
+        </section>
+
         <section class="view" id="centers">
           <section class="panel">
             <div class="panel-head">
-              <h2>센터 마스터</h2>
+              <div>
+                <h2>센터 마스터</h2>
+                <p class="panel-copy">센터별 GAON 센터코드(창고코드)를 등록하면 재고 갱신 시 자동으로 적용됩니다.</p>
+              </div>
               <form class="inline-form" id="addCenterForm">
                 <input id="newCenterName" type="text" placeholder="신규 센터명" required />
                 <button class="primary" type="submit">센터 추가</button>
               </form>
             </div>
             <div class="center-list" id="centerManager"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>센터 도면 마스터</h2>
+                <p class="panel-copy">센터·층별 도면을 로컬 파일 저장소에 한 번 등록합니다. 각 화면은 저장된 도면 주소만 참조하므로 브라우저 용량을 거의 사용하지 않습니다.</p>
+              </div>
+              <div class="floorplan-master-actions">
+                <select id="floorplanMasterCenter" aria-label="도면 센터 선택"></select>
+                <select id="floorplanMasterFloor" aria-label="도면 층 선택"></select>
+                <label class="file-button small">도면 등록/변경
+                  <input id="floorplanMasterUpload" type="file" accept=".pdf,image/*" />
+                </label>
+                <button class="ghost small" id="floorplanMasterMigrate" type="button" hidden>기존 도면 파일 저장 전환</button>
+              </div>
+            </div>
+            <div class="floorplan-master-card" id="floorplanMasterCard"></div>
+            <p class="save-status" id="floorplanMasterStatus">센터와 층을 선택해 도면을 등록하세요.</p>
           </section>
 
           <section class="panel">
@@ -666,6 +737,10 @@
               <strong>6. 자료 공유</strong>
               <p>CSV 내보내기로 현재 CAPA 입력 데이터를 내려받아 회의자료나 취합용 파일로 활용합니다.</p>
             </article>
+            <article class="manual-card">
+              <strong>7. 누적 비교</strong>
+              <p>메일 직접 발송 시 당일 CAPA가 자동 저장됩니다. 누적 관리에서 저장 일자·주차·월 단위로 센터와 화주사 증감을 비교합니다.</p>
+            </article>
           </div>
         </section>
       </main>
@@ -760,7 +835,7 @@
                 <input id="gaonCenterName" type="text" readonly />
               </label>
               <label>WMS 창고코드
-                <input id="gaonWarehouse" type="text" placeholder="예: 0000200" />
+                <input id="gaonWarehouse" type="text" placeholder="마스터 관리에서 등록" readonly />
               </label>
               <label>기준일자
                 <input id="gaonDate" type="date" />
@@ -854,6 +929,20 @@
       </section>
     </div>
 
+    <div class="modal" id="historySnapshotModal" aria-hidden="true">
+      <div class="modal-backdrop" id="historySnapshotBackdrop"></div>
+      <section class="modal-panel history-snapshot-panel" role="dialog" aria-modal="true" aria-labelledby="historySnapshotTitle">
+        <div class="modal-head">
+          <div><span>누적 관리 · 저장 이력</span><h2 id="historySnapshotTitle">과거 CAPA 대시보드</h2></div>
+          <div class="actions">
+            <button class="primary" id="historySnapshotFullscreen" type="button">전체화면</button>
+            <button class="ghost" id="historySnapshotClose" type="button">닫기</button>
+          </div>
+        </div>
+        <div id="historySnapshotBody"></div>
+      </section>
+    </div>
+
     <div class="sync-login" id="syncLogin" hidden>
       <section class="sync-login-card" role="dialog" aria-modal="true" aria-labelledby="syncLoginTitle">
         <span class="brand-mark">HX</span>
@@ -874,6 +963,6 @@
       <figcaption id="imgModalCaption"></figcaption>
       <img id="imgModalImg" alt="" />
     </div>
-    <script src="./app.js?v=84"></script>
+    <script src="./app.js?v=99"></script>
   </body>
 </html>

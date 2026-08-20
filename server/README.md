@@ -148,7 +148,22 @@ py server\serve.py
 ```
 
 - `GET /api/mail/status`: 발송 설정 여부 확인(시크릿은 반환하지 않음)
-- `POST /api/mail/send`: `{to: [메일주소], subject, html, attachmentHtml, attachmentName}` 형식으로 HTML 본문과 별도의 HTML 첨부파일을 발송. 현재 화면은 대시보드 주소로 이동하는 바로가기 HTML을 전달함
+- `POST /api/mail/send`: `{to: [메일주소], subject, html, attachmentHtml, attachmentName}` 형식으로 HTML 본문과 별도의 HTML 첨부파일을 발송. 현재 화면은 `http://localhost:5180/` 로컬 대시보드로 이동하는 바로가기 HTML을 전달함. 수신자 PC에서 로컬 서버가 실행 중이어야 열림
+
+## 센터 도면 파일 저장
+
+마스터 관리의 **센터 도면 마스터**에서 PDF/이미지를 등록하면 브라우저 `localStorage`에 Base64 이미지를 넣지 않고 `CAPA_DATA_DIR/floorplans/`에 이미지 파일로 저장한다. 앱 상태에는 `/api/floorplan/file/...` 주소만 남으므로 큰 도면으로 인한 브라우저 저장 용량 초과를 방지한다. 기존 Base64 도면은 화면의 **기존 도면 파일 저장 전환** 버튼으로 옮길 수 있다.
+
+- `POST /api/floorplan/upload`: `{center, floor, image}` 형식의 축소된 이미지 Data URL을 로컬 파일로 저장
+- `GET /api/floorplan/file/{filename}`: 저장된 도면 이미지 조회
+
+## CAPA 누적 이력
+
+메일 직접 발송이 성공하거나 누적 관리에서 수동 저장하면 센터별 CAPA와 화주별 PLT 합계를 `CAPA_DATA_DIR/capa-history.json`에 저장한다. 원본 GAON 셀은 복제하지 않으며 같은 날짜에 다시 저장하면 당일 최신본으로 갱신한다. 주차·월 비교는 기간 내 마지막 저장본을 사용한다.
+
+- `GET /api/history`: 서버에 저장된 누적 이력 조회
+- `POST /api/history/save`: `{snapshot}`을 기준일자별로 저장 또는 갱신
+- `POST /api/history/delete`: `{id}`에 해당하는 저장 이력 삭제
 
 ## Vercel 메일 발송
 

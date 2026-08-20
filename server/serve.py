@@ -12,6 +12,7 @@ r"""capa_dash 로컬 서버 + gaon 재고 연동 중계.
 """
 
 import hmac
+import hashlib
 import http.cookies
 import json
 import os
@@ -49,6 +50,9 @@ MS_CLIENT_ID = os.environ.get("MS_CLIENT_ID", "").strip()
 MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
 MAIL_SENDER = os.environ.get("MAIL_SENDER", "").strip()
 OUTLOOK_DESKTOP_SEND = os.environ.get("OUTLOOK_DESKTOP_SEND", "").strip().lower() not in ("0", "false", "no")
+FLOORPLAN_DIR = os.path.join(store.DATA_DIR, "floorplans")
+HISTORY_PATH = os.path.join(store.DATA_DIR, "capa-history.json")
+_history_lock = threading.RLock()
 
 # 로그인 세션은 이 프로세스 메모리에만 둔다 (비밀번호는 저장하지 않는다)
 SESSION = gaon.Session()
@@ -81,12 +85,121 @@ def _ensure_session():
     return False
 
 
+def _save_floorplan_asset(center, floor, data_url):
+    match = re.fullmatch(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)", str(data_url or ""))
+    if not match:
+        raise ValueError("지원하지 않는 도면 이미지 형식입니다")
+    raw = base64.b64decode(match.group(2), validate=True)
+    if not raw or len(raw) > 12 * 1024 * 1024:
+        raise ValueError("도면 이미지는 12MB 이하로 등록해 주세요")
+    extension = {"jpeg": "jpg", "png": "png", "webp": "webp"}[match.group(1)]
+    digest = hashlib.sha256(f"{center}\0{floor}".encode("utf-8")).hexdigest()[:24]
+    filename = f"floorplan-{digest}.{extension}"
+    os.makedirs(FLOORPLAN_DIR, exist_ok=True)
+    for old_extension in ("jpg", "png", "webp"):
+        old_path = os.path.join(FLOORPLAN_DIR, f"floorplan-{digest}.{old_extension}")
+        if old_path != os.path.join(FLOORPLAN_DIR, filename):
+            try:
+                os.unlink(old_path)
+            except FileNotFoundError:
+                pass
+    target = os.path.join(FLOORPLAN_DIR, filename)
+    fd, temporary = tempfile.mkstemp(dir=FLOORPLAN_DIR, prefix=".floorplan-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(raw)
+        os.replace(temporary, target)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    version = int(os.path.getmtime(target))
+    return filename, len(raw), f"/api/floorplan/file/{filename}?v={version}"
+
+
+def _load_capa_history():
+    with _history_lock:
+        try:
+            with open(HISTORY_PATH, "r", encoding="utf-8") as source:
+                data = json.load(source)
+            snapshots = data.get("snapshots") if isinstance(data, dict) else []
+            return snapshots if isinstance(snapshots, list) else []
+        except FileNotFoundError:
+            return []
+        except Exception as error:
+            print(f"  ! CAPA 누적 이력을 읽지 못했습니다: {error}")
+            return []
+
+
+def _write_capa_history(snapshots):
+    os.makedirs(store.DATA_DIR, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=store.DATA_DIR, prefix=".capa-history-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump({"version": 1, "snapshots": snapshots}, output, ensure_ascii=False, separators=(",", ":"))
+        os.replace(temporary, HISTORY_PATH)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _save_capa_snapshot(snapshot):
+    if not isinstance(snapshot, dict):
+        raise ValueError("CAPA 저장 데이터 형식이 올바르지 않습니다")
+    business_date = str(snapshot.get("businessDate") or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", business_date):
+        raise ValueError("CAPA 저장 기준일자가 올바르지 않습니다")
+    if not isinstance(snapshot.get("centers"), list) or not isinstance(snapshot.get("totals"), dict):
+        raise ValueError("센터별 CAPA 합계가 필요합니다")
+    with _history_lock:
+        snapshots = _load_capa_history()
+        snapshots = [item for item in snapshots if item.get("businessDate") != business_date]
+        snapshots.append(snapshot)
+        snapshots.sort(key=lambda item: str(item.get("capturedAt") or ""))
+        snapshots = snapshots[-2000:]
+        _write_capa_history(snapshots)
+        return snapshots
+
+
+def _delete_capa_snapshot(snapshot_id):
+    with _history_lock:
+        snapshots = [item for item in _load_capa_history() if str(item.get("id")) != snapshot_id]
+        _write_capa_history(snapshots)
+        return snapshots
+
+
 def _mail_configured():
     return all((MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MAIL_SENDER))
 
 
 def _outlook_desktop_available():
     return os.name == "nt" and OUTLOOK_DESKTOP_SEND and HOST in ("127.0.0.1", "localhost")
+
+
+def _diagnose_outlook_desktop():
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$outlook = New-Object -ComObject Outlook.Application
+$mail = $outlook.CreateItem(0)
+$version = [string]$outlook.Version
+[void][Runtime.InteropServices.Marshal]::ReleaseComObject($mail)
+[void][Runtime.InteropServices.Marshal]::ReleaseComObject($outlook)
+Write-Output $version
+"""
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    result = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "Outlook 연결 실패").strip()
+        raise RuntimeError(detail[-1200:])
+    return (result.stdout or "").strip()
 
 
 def _graph_request(url, data, headers=None):
@@ -302,6 +415,27 @@ class Handler(SimpleHTTPRequestHandler):
                 pass
             return self._json({"ok": True}, cookie=f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 
+        if u.path.startswith("/api/floorplan/file/"):
+            if self._guard():
+                return
+            filename = unquote(u.path.rsplit("/", 1)[-1])
+            if not re.fullmatch(r"floorplan-[a-f0-9]{24}\.(jpg|png|webp)", filename):
+                return self.send_error(404)
+            path = os.path.join(FLOORPLAN_DIR, filename)
+            try:
+                with open(path, "rb") as source:
+                    body = source.read()
+            except FileNotFoundError:
+                return self.send_error(404)
+            content_type = "image/jpeg" if filename.endswith(".jpg") else "image/png" if filename.endswith(".png") else "image/webp"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "private, max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # ── 공유 저장소 ──────────────────────────────────────────────────
         if u.path.startswith("/api/store") and not SHARE_ENABLED:
             return self._json({"ok": False, "shareOff": True, "error": "공유 저장소가 꺼져 있습니다 (SHARE=1 로 실행)"}, 404)
@@ -334,6 +468,14 @@ class Handler(SimpleHTTPRequestHandler):
         if u.path == "/api/mail/status":
             mode = "graph" if _mail_configured() else "outlook-desktop" if _outlook_desktop_available() else ""
             return self._json({"ok": True, "configured": bool(mode), "mode": mode, "sender": MAIL_SENDER if mode == "graph" else "현재 Outlook 계정" if mode else ""})
+        if u.path == "/api/mail/diagnose":
+            try:
+                version = _diagnose_outlook_desktop()
+                return self._json({"ok": True, "mode": "outlook-desktop", "version": version})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 503)
+        if u.path == "/api/history":
+            return self._json({"ok": True, "snapshots": _load_capa_history()})
         if u.path == "/api/gaon/logout":
             SESSION.opener = None
             SESSION.user_id = ""
@@ -403,6 +545,37 @@ class Handler(SimpleHTTPRequestHandler):
 
         if u.path.startswith("/api/") and self._guard():
             return
+
+        if u.path == "/api/floorplan/upload":
+            try:
+                body = self._body(limit=18 * 1024 * 1024)
+                center = str(body.get("center") or "").strip()[:100]
+                floor = str(body.get("floor") or "").strip()[:100]
+                if not center or not floor:
+                    return self._json({"ok": False, "error": "센터와 층을 선택해 주세요."}, 400)
+                filename, size, url = _save_floorplan_asset(center, floor, body.get("image"))
+                return self._json({"ok": True, "filename": filename, "bytes": size, "url": url})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+
+        if u.path == "/api/history/save":
+            try:
+                body = self._body(limit=2 * 1024 * 1024)
+                snapshots = _save_capa_snapshot(body.get("snapshot"))
+                return self._json({"ok": True, "snapshots": snapshots})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+
+        if u.path == "/api/history/delete":
+            try:
+                body = self._body(limit=4096)
+                snapshot_id = str(body.get("id") or "").strip()
+                if not snapshot_id:
+                    return self._json({"ok": False, "error": "삭제할 저장 이력이 필요합니다."}, 400)
+                snapshots = _delete_capa_snapshot(snapshot_id)
+                return self._json({"ok": True, "snapshots": snapshots})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
 
         if u.path == "/api/gaon/login":
             try:

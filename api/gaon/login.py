@@ -29,5 +29,7 @@ class handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "사번과 비밀번호가 필요합니다."}, 400)
             gaon.Session().login(company, user_id, password)
             self._json({"ok": True, "userId": user_id, "company": company, "stateless": True})
+        except json.JSONDecodeError:
+            self._json({"ok": False, "error": "올바른 JSON 요청이 아닙니다."}, 400)
         except Exception as error:
             self._json({"ok": False, "error": str(error)}, 401)

@@ -29,6 +29,23 @@ const CENTER_IMAGES = {
   김해센터: "./assets/centers/gimhae.png",
   화성센터: "./assets/centers/hwaseong.jpg",
 };
+const CENTER_CAPACITY_SEED_VERSION = 2;
+// 2026-08-19: 브라우저에 남은 대용량 도면(Base64 포함)을 한 번 비운다.
+// 랙 배치·재고·센터 CAPA는 유지하고 floorplans 데이터만 제거한다.
+const FLOORPLAN_PURGE_VERSION = 1;
+const DEFAULT_CENTER_CAPACITIES = {
+  남이천1센터: 43888,
+  남이천2센터: 47606,
+  동이천센터: 19529,
+  이천센터: 21745,
+  이천데포: 8359,
+  북이천센터: 17446,
+  설성센터: 15250,
+  대월센터: 13428,
+  백암센터: 7496,
+  김해센터: 8627,
+  화성센터: 0,
+};
 // 센터별 기본 층 구성 (없으면 ["1F"])
 const DEFAULT_CENTER_FLOORS = {
   남이천1센터: ["지하1층", "지상2층", "지상4층"],
@@ -360,8 +377,12 @@ const defaultState = {
   kakaoApiKey: "",
   offbook: {},
   centerCapacities: {},
+  centerWmsCodes: { 남이천1센터: "0000200" },
+  centerCapacitySeedVersion: 0,
+  floorplanPurgeVersion: 0,
   gaonShipperSeedVersion: 0,
   mailRecipients: [],
+  capaSnapshots: [],
 };
 
 let state = loadState();
@@ -371,6 +392,12 @@ const launchCenter = launchParams.get("center");
 let selectedCenter = state.centers.includes(launchCenter) ? launchCenter : state.centers[0];
 let mailingSelectedCenter = selectedCenter;
 let selectedFloor = getCenterFloors(selectedCenter)[0];
+let floorplanMasterCenter = selectedCenter;
+let floorplanMasterFloor = selectedFloor;
+let historyUnit = "week";
+let historyLeftKey = "";
+let historyRightKey = "";
+let viewedSnapshotId = "";
 let twinCenter = null;
 let twinFloor = null;
 let twinHeightMode = "capa";
@@ -431,8 +458,11 @@ function loadState() {
       nami1DiagWalls: !!parsed.nami1DiagWalls,
       offbook: parsed.offbook || {},
       centerCapacities: parsed.centerCapacities || {},
+      centerCapacitySeedVersion: parsed.centerCapacitySeedVersion || 0,
+      floorplanPurgeVersion: parsed.floorplanPurgeVersion || 0,
       gaonShipperSeedVersion: parsed.gaonShipperSeedVersion || 0,
       mailRecipients: parsed.mailRecipients || [],
+      capaSnapshots: Array.isArray(parsed.capaSnapshots) ? parsed.capaSnapshots : [],
     };
   } catch {
     return structuredClone(defaultState);
@@ -441,6 +471,11 @@ function loadState() {
 
 function ensureBaselineState() {
   let changed = false;
+  if (number(state.floorplanPurgeVersion) < FLOORPLAN_PURGE_VERSION) {
+    state.floorplans = {};
+    state.floorplanPurgeVersion = FLOORPLAN_PURGE_VERSION;
+    changed = true;
+  }
   if (!state.centers.includes("동이천센터")) {
     const nami2Index = state.centers.indexOf("남이천2센터");
     const insertIndex = nami2Index >= 0 ? nami2Index + 1 : state.centers.length;
@@ -477,8 +512,30 @@ function ensureBaselineState() {
     state.mailRecipients = [];
     changed = true;
   }
+  if (!Array.isArray(state.capaSnapshots)) {
+    state.capaSnapshots = [];
+    changed = true;
+  }
   if (!state.centerCapacities) {
     state.centerCapacities = {};
+    changed = true;
+  }
+  if (!state.centerWmsCodes) {
+    state.centerWmsCodes = {};
+    changed = true;
+  }
+  if (!Object.prototype.hasOwnProperty.call(state.centerWmsCodes, "남이천1센터")) {
+    state.centerWmsCodes["남이천1센터"] = "0000200";
+    changed = true;
+  }
+  if (number(state.centerCapacitySeedVersion) < 1) {
+    Object.assign(state.centerCapacities, DEFAULT_CENTER_CAPACITIES);
+    state.centerCapacitySeedVersion = 1;
+    changed = true;
+  }
+  if (number(state.centerCapacitySeedVersion) < CENTER_CAPACITY_SEED_VERSION) {
+    state.centerCapacities["남이천1센터"] = 43888;
+    state.centerCapacitySeedVersion = CENTER_CAPACITY_SEED_VERSION;
     changed = true;
   }
   if (!Object.prototype.hasOwnProperty.call(state.centerCapacities, "김해센터")) {
@@ -767,6 +824,28 @@ async function fileToFloorplanImage(file) {
     r.readAsDataURL(file);
   });
   return downscaleImage(dataUrl);
+}
+
+function embeddedFloorplanImage(image) {
+  return /^data:image\/(jpeg|png|webp);base64,/i.test(String(image || ""));
+}
+
+async function saveFloorplanAsset(center, floor, image) {
+  const response = await fetch("/api/floorplan/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ center, floor, image }),
+  });
+  const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
+  if (!response.ok || !data.ok || !data.url) throw new Error(data.error || `HTTP ${response.status}`);
+  getFloorplan(center, floor).image = data.url;
+  if (!saveState()) throw new Error("도면 주소를 브라우저 상태에 저장하지 못했습니다");
+  return data;
+}
+
+async function uploadFloorplanFile(file, center, floor) {
+  const image = await fileToFloorplanImage(file);
+  return saveFloorplanAsset(center, floor, image);
 }
 
 function getCenterFloors(center) {
@@ -1058,6 +1137,328 @@ function dashboardGrandTotals(centers = state.centers) {
     total.used += item.used;
     return total;
   }, { capacity: 0, used: 0 });
+}
+
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function createCapaSnapshot(source = "manual", note = "") {
+  const captured = new Date();
+  const centers = state.centers.map((center) => {
+    const item = dashboardCenterTotals(center);
+    return {
+      center,
+      capacity: number(item.capacity),
+      used: number(item.used),
+      free: Math.max(number(item.capacity) - number(item.used), 0),
+      shippers: aggregateShippers(item.shippers || []).filter((shipper) => shipper.used > 0),
+    };
+  });
+  const capacity = centers.reduce((sum, row) => sum + row.capacity, 0);
+  const used = centers.reduce((sum, row) => sum + row.used, 0);
+  return {
+    id: `capa-${captured.getTime()}`,
+    capturedAt: captured.toISOString(),
+    businessDate: localDateKey(captured),
+    source,
+    note,
+    totals: { capacity, used, free: Math.max(capacity - used, 0) },
+    centers,
+  };
+}
+
+async function captureCapaSnapshot(source = "manual", note = "") {
+  const snapshot = createCapaSnapshot(source, note);
+  const replaced = state.capaSnapshots.some((item) => item.businessDate === snapshot.businessDate);
+  try {
+    const response = await fetch("/api/history/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snapshot }),
+    });
+    const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
+    if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    state.capaSnapshots = Array.isArray(data.snapshots) ? data.snapshots : state.capaSnapshots;
+    renderHistoryManagement();
+    return { snapshot, replaced, serverSaved: true };
+  } catch (error) {
+    // 로컬 서버를 잠시 사용할 수 없을 때만 브라우저 저장을 보조 수단으로 사용한다.
+    // 평상시에는 대용량 GAON 셀 재고가 localStorage 한도를 차지해도 누적 저장을 막지 않는다.
+    const previous = state.capaSnapshots.slice();
+    const sameDayIndex = state.capaSnapshots.findIndex((item) => item.businessDate === snapshot.businessDate);
+    if (sameDayIndex >= 0) state.capaSnapshots[sameDayIndex] = snapshot;
+    else state.capaSnapshots.push(snapshot);
+    state.capaSnapshots.sort((a, b) => String(a.capturedAt).localeCompare(String(b.capturedAt)));
+    if (saveLocalOnly()) {
+      renderHistoryManagement();
+      throw new Error(`서버 저장 실패(브라우저에 임시 저장됨): ${error.message}`);
+    }
+    state.capaSnapshots = previous;
+    renderHistoryManagement();
+    throw new Error(`누적 이력 서버 저장 실패: ${error.message}`);
+  }
+}
+
+async function loadCapaHistoryFromServer() {
+  const status = $("#historySaveStatus");
+  try {
+    const response = await fetch("/api/history", { cache: "no-store" });
+    const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
+    if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    const serverSnapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
+    const byDate = new Map(serverSnapshots.map((snapshot) => [snapshot.businessDate, snapshot]));
+    const localOnly = state.capaSnapshots.filter((snapshot) => {
+      const server = byDate.get(snapshot.businessDate);
+      return !server || String(server.capturedAt) < String(snapshot.capturedAt);
+    });
+    for (const snapshot of localOnly) {
+      const saveResponse = await fetch("/api/history/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot }),
+      });
+      const saved = await saveResponse.json();
+      if (saveResponse.ok && saved.ok && Array.isArray(saved.snapshots)) {
+        serverSnapshots.splice(0, serverSnapshots.length, ...saved.snapshots);
+      }
+    }
+    state.capaSnapshots = serverSnapshots.sort((a, b) => String(a.capturedAt).localeCompare(String(b.capturedAt)));
+    renderHistoryManagement();
+    if (status) {
+      status.textContent = `서버 이력 ${state.capaSnapshots.length}건`;
+      status.className = "save-status saved";
+    }
+  } catch (error) {
+    renderHistoryManagement();
+    if (status) {
+      status.textContent = `서버 이력 연결 실패 · 브라우저 ${state.capaSnapshots.length}건`;
+      status.className = "save-status error";
+      status.title = error.message;
+    }
+  }
+}
+
+async function deleteCapaSnapshot(snapshot) {
+  const response = await fetch("/api/history/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: snapshot.id }),
+  });
+  const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
+  if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  state.capaSnapshots = Array.isArray(data.snapshots) ? data.snapshots : state.capaSnapshots.filter((item) => item.id !== snapshot.id);
+}
+
+function snapshotDateParts(snapshot) {
+  const parts = String(snapshot.businessDate || "").split("-").map(Number);
+  const fallback = new Date(snapshot.capturedAt || Date.now());
+  return {
+    year: parts[0] || fallback.getFullYear(),
+    month: parts[1] || fallback.getMonth() + 1,
+    day: parts[2] || fallback.getDate(),
+  };
+}
+
+function snapshotPeriod(snapshot, unit) {
+  const { year, month, day } = snapshotDateParts(snapshot);
+  if (unit === "month") return { key: `${year}-${String(month).padStart(2, "0")}`, label: `${year}년 ${month}월` };
+  if (unit === "week") {
+    const week = Math.ceil(day / 7);
+    return { key: `${year}-${String(month).padStart(2, "0")}-W${week}`, label: `${year}년 ${month}월 ${week}주차` };
+  }
+  const when = new Date(snapshot.capturedAt || Date.now());
+  return { key: snapshot.id, label: `${year}.${month}.${day} ${when.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}` };
+}
+
+function historyGroups(unit = historyUnit) {
+  const groups = new Map();
+  state.capaSnapshots.forEach((snapshot) => {
+    const period = snapshotPeriod(snapshot, unit);
+    const current = groups.get(period.key);
+    if (!current || String(current.snapshot.capturedAt) < String(snapshot.capturedAt)) {
+      groups.set(period.key, { ...period, snapshot, count: (current?.count || 0) + 1 });
+    } else {
+      current.count += 1;
+    }
+  });
+  return [...groups.values()].sort((a, b) => String(a.snapshot.capturedAt).localeCompare(String(b.snapshot.capturedAt)));
+}
+
+function snapshotShipperMap(snapshot) {
+  const map = new Map();
+  (snapshot?.centers || []).forEach((center) => {
+    (center.shippers || []).forEach((shipper) => {
+      map.set(shipper.name, (map.get(shipper.name) || 0) + number(shipper.used));
+    });
+  });
+  return map;
+}
+
+function signedPlt(value) {
+  const amount = Math.round(number(value) * 10) / 10;
+  return `${amount > 0 ? "+" : ""}${amount.toLocaleString("ko-KR")} PLT`;
+}
+
+function deltaClass(value) {
+  return number(value) > 0 ? "up" : number(value) < 0 ? "down" : "same";
+}
+
+function renderHistoryManagement() {
+  const unitSelect = $("#historyUnit");
+  const leftSelect = $("#historyLeft");
+  const rightSelect = $("#historyRight");
+  if (!unitSelect || !leftSelect || !rightSelect) return;
+  unitSelect.value = historyUnit;
+  const groups = historyGroups(historyUnit);
+  if (!groups.some((group) => group.key === historyRightKey)) historyRightKey = groups.at(-1)?.key || "";
+  if (!groups.some((group) => group.key === historyLeftKey)) historyLeftKey = groups.at(-2)?.key || historyRightKey;
+  const options = groups.map((group) => `<option value="${escapeAttr(group.key)}">${escapeHtml(group.label)}${group.count > 1 ? ` · ${group.count}회 중 최신` : ""}</option>`).join("");
+  leftSelect.innerHTML = options || `<option value="">저장 이력 없음</option>`;
+  rightSelect.innerHTML = options || `<option value="">저장 이력 없음</option>`;
+  leftSelect.value = historyLeftKey;
+  rightSelect.value = historyRightKey;
+  const leftGroup = groups.find((group) => group.key === historyLeftKey);
+  const rightGroup = groups.find((group) => group.key === historyRightKey);
+  const left = leftGroup?.snapshot;
+  const right = rightGroup?.snapshot;
+  const kpis = $("#historyKpis");
+  const centerBox = $("#historyCenterCompare");
+  const shipperBox = $("#historyShipperCompare");
+  const caption = $("#historyCenterCaption");
+  if (!left || !right) {
+    kpis.innerHTML = `<div class="empty">현재 현황을 저장하면 기간별 비교가 시작됩니다.</div>`;
+    centerBox.innerHTML = `<div class="empty">비교할 저장 이력이 없습니다.</div>`;
+    shipperBox.innerHTML = `<div class="empty">비교할 저장 이력이 없습니다.</div>`;
+    caption.textContent = "비교할 저장본을 선택하세요.";
+  } else {
+    const usedDelta = number(right.totals?.used) - number(left.totals?.used);
+    const freeDelta = number(right.totals?.free) - number(left.totals?.free);
+    const leftRate = percent(left.totals?.used, left.totals?.capacity);
+    const rightRate = percent(right.totals?.used, right.totals?.capacity);
+    kpis.innerHTML = `
+      <article><span>${escapeHtml(leftGroup.label)} 사용</span><strong>${formatPlt(left.totals?.used)}</strong><small>사용률 ${leftRate}%</small></article>
+      <article><span>${escapeHtml(rightGroup.label)} 사용</span><strong>${formatPlt(right.totals?.used)}</strong><small>사용률 ${rightRate}%</small></article>
+      <article class="${deltaClass(usedDelta)}"><span>사용 CAPA 증감</span><strong>${signedPlt(usedDelta)}</strong><small>사용률 ${rightRate - leftRate > 0 ? "+" : ""}${rightRate - leftRate}%p</small></article>
+      <article class="${deltaClass(freeDelta)}"><span>여유 CAPA 증감</span><strong>${signedPlt(freeDelta)}</strong><small>비교 기간 기준</small></article>`;
+    caption.textContent = `${leftGroup.label} → ${rightGroup.label} · 각 기간 마지막 저장본 기준`;
+    const leftCenters = new Map((left.centers || []).map((row) => [row.center, row]));
+    const rightCenters = new Map((right.centers || []).map((row) => [row.center, row]));
+    const centerNames = [...new Set([...(left.centers || []).map((row) => row.center), ...(right.centers || []).map((row) => row.center)])];
+    centerBox.innerHTML = `<div class="history-row history-center-row head"><span>센터</span><span>기준 사용</span><span>비교 사용</span><span>사용 증감</span><span>여유 증감</span><span>사용률 변화</span></div>${centerNames.map((center) => {
+      const before = leftCenters.get(center) || {};
+      const after = rightCenters.get(center) || {};
+      const usedChange = number(after.used) - number(before.used);
+      const freeChange = number(after.free) - number(before.free);
+      const rateChange = percent(after.used, after.capacity) - percent(before.used, before.capacity);
+      return `<div class="history-row history-center-row"><strong>${escapeHtml(center)}</strong><span>${formatPlt(before.used)}</span><span>${formatPlt(after.used)}</span><b class="${deltaClass(usedChange)}">${signedPlt(usedChange)}</b><b class="${deltaClass(freeChange)}">${signedPlt(freeChange)}</b><b class="${deltaClass(rateChange)}">${rateChange > 0 ? "+" : ""}${rateChange}%p</b></div>`;
+    }).join("")}`;
+    const beforeShippers = snapshotShipperMap(left);
+    const afterShippers = snapshotShipperMap(right);
+    const changes = [...new Set([...beforeShippers.keys(), ...afterShippers.keys()])].map((name) => ({
+      name,
+      before: beforeShippers.get(name) || 0,
+      after: afterShippers.get(name) || 0,
+      delta: (afterShippers.get(name) || 0) - (beforeShippers.get(name) || 0),
+    })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 10);
+    shipperBox.innerHTML = changes.length
+      ? `<div class="history-row history-shipper-row head"><span>순위</span><span>화주사</span><span>기준</span><span>비교</span><span>증감</span></div>${changes.map((row, index) => `<div class="history-row history-shipper-row"><b>${index + 1}</b><strong>${escapeHtml(row.name)}</strong><span>${formatPlt(row.before)}</span><span>${formatPlt(row.after)}</span><b class="${deltaClass(row.delta)}">${signedPlt(row.delta)}</b></div>`).join("")}`
+      : `<div class="empty">화주사 보관 CAPA 변화가 없습니다.</div>`;
+  }
+  const snapshots = state.capaSnapshots.slice().sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
+  $("#snapshotList").innerHTML = snapshots.length ? snapshots.map((snapshot) => {
+    const when = new Date(snapshot.capturedAt);
+    const source = snapshot.source === "mail" ? "메일 발송" : "수동 저장";
+    return `<div class="snapshot-item"><div><strong>${when.toLocaleString("ko-KR")}</strong><span>${source}${snapshot.note ? ` · ${escapeHtml(snapshot.note)}` : ""}</span></div><div><b>${formatPlt(snapshot.totals?.used)}</b><small>여유 ${formatPlt(snapshot.totals?.free)}</small></div><div class="snapshot-actions"><button class="primary mini" data-snapshot-view="${escapeAttr(snapshot.id)}" type="button">보기</button><button class="ghost danger mini" data-snapshot-remove="${escapeAttr(snapshot.id)}" type="button">삭제</button></div></div>`;
+  }).join("") : `<div class="empty">아직 저장된 CAPA 현황이 없습니다.</div>`;
+}
+
+function renderSnapshotCenterDetail(snapshot, centerName) {
+  const body = $("#historySnapshotCenterBody");
+  if (!body) return;
+  const center = (snapshot.centers || []).find((row) => row.center === centerName) || snapshot.centers?.[0];
+  if (!center) {
+    body.innerHTML = `<div class="empty">저장된 센터 상세가 없습니다.</div>`;
+    return;
+  }
+  const shippers = aggregateShippers(center.shippers || []).filter((row) => row.used > 0);
+  body.innerHTML = `
+    <div class="snapshot-center-kpis">
+      <article><span>전체 CAPA</span><strong>${formatPlt(center.capacity)}</strong></article>
+      <article><span>사용 CAPA</span><strong>${formatPlt(center.used)}</strong></article>
+      <article><span>여유 CAPA</span><strong>${formatPlt(center.free)}</strong></article>
+      <article><span>사용률</span><strong>${percent(center.used, center.capacity)}%</strong></article>
+    </div>
+    <div class="snapshot-shipper-bars">
+      ${shippers.map((shipper, index) => {
+        const share = percent(shipper.used, center.used);
+        return `<div class="snapshot-shipper-row"><b>${index + 1}</b><strong>${escapeHtml(shipper.name)}</strong><div><i style="width:${Math.min(share, 100)}%"></i></div><span>${formatPlt(shipper.used)} <small>${share}%</small></span></div>`;
+      }).join("") || `<div class="empty">이 시점에 저장된 화주사 재고가 없습니다.</div>`}
+    </div>`;
+}
+
+function openHistorySnapshot(snapshotId) {
+  const snapshot = state.capaSnapshots.find((item) => item.id === snapshotId);
+  const modal = $("#historySnapshotModal");
+  const body = $("#historySnapshotBody");
+  if (!snapshot || !modal || !body) return;
+  viewedSnapshotId = snapshot.id;
+  const when = new Date(snapshot.capturedAt).toLocaleString("ko-KR");
+  const centers = snapshot.centers || [];
+  body.innerHTML = `
+    <div class="snapshot-history-notice"><strong>${when} 저장본</strong><span>현재 재고가 아닌 저장 당시의 센터·화주별 CAPA 합계입니다.</span></div>
+    <div class="snapshot-dashboard-canvas">${dashboardMailHtml(snapshot)}</div>
+    <section class="snapshot-center-history">
+      <div class="panel-head"><div><h3>저장 시점 센터별 화주 점유 상세</h3><p class="panel-copy">센터를 선택하면 당시 저장된 화주사별 보관 CAPA를 확인할 수 있습니다.</p></div><select id="historySnapshotCenterSelect">${centers.map((row) => `<option value="${escapeAttr(row.center)}">${escapeHtml(row.center)}</option>`).join("")}</select></div>
+      <div id="historySnapshotCenterBody"></div>
+    </section>`;
+  $("#historySnapshotTitle").textContent = `${snapshot.businessDate} CAPA 대시보드`;
+  $("#historySnapshotCenterSelect")?.addEventListener("change", (event) => renderSnapshotCenterDetail(snapshot, event.target.value));
+  renderSnapshotCenterDetail(snapshot, centers[0]?.center);
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  requestHistorySnapshotFullscreen();
+}
+
+function closeHistorySnapshot() {
+  viewedSnapshotId = "";
+  const panel = $("#historySnapshotModal .history-snapshot-panel");
+  if (document.fullscreenElement && panel?.contains(document.fullscreenElement)) {
+    exitHistorySnapshotFullscreen();
+  }
+  $("#historySnapshotModal")?.classList.remove("open");
+  $("#historySnapshotModal")?.setAttribute("aria-hidden", "true");
+  if ($("#historySnapshotBody")) $("#historySnapshotBody").innerHTML = "";
+}
+
+function exitHistorySnapshotFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit) return;
+  try {
+    const result = exit.call(document);
+    result?.catch?.(() => {});
+  } catch {
+    // 전체화면 종료를 지원하지 않아도 팝업 닫기는 계속한다.
+  }
+}
+
+function requestHistorySnapshotFullscreen() {
+  const panel = $("#historySnapshotModal .history-snapshot-panel");
+  if (!panel || document.fullscreenElement) return;
+  const request = panel.requestFullscreen || panel.webkitRequestFullscreen;
+  if (!request) return;
+  try {
+    const result = request.call(panel);
+    result?.catch?.(() => {});
+  } catch {
+    // 브라우저가 전체화면을 차단해도 CSS 전체화면 팝업은 그대로 유지한다.
+  }
+}
+
+function syncHistorySnapshotFullscreenButton() {
+  const button = $("#historySnapshotFullscreen");
+  if (!button) return;
+  button.textContent = document.fullscreenElement ? "전체화면 종료" : "전체화면";
 }
 
 function allCategories() {
@@ -1922,55 +2323,82 @@ function occupancyDonutDataUrl(item, center) {
   return canvas.toDataURL("image/png");
 }
 
-function dashboardMailHtml(detailCenter = mailingSelectedCenter, interactive = false) {
-  const rows = state.centers.map((center) => ({ center, ...dashboardCenterTotals(center) }));
-  const selectedDetailCenter = state.centers.includes(detailCenter) ? detailCenter : state.centers[0];
-  const totals = dashboardGrandTotals();
+function dashboardMailHtml(snapshot = null) {
+  const rows = snapshot
+    ? (snapshot.centers || []).map((row) => ({ ...row, shippers: row.shippers || [] }))
+    : state.centers.map((center) => ({ center, ...dashboardCenterTotals(center) }));
+  const totals = snapshot?.totals || dashboardGrandTotals();
   const free = Math.max(totals.capacity - totals.used, 0);
   const totalRate = percent(totals.used, totals.capacity);
-  const now = new Date().toLocaleString("ko-KR");
-  const kpiCell = (label, value, color, note) => `<td width="25%" valign="top" style="padding:0 5px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #d7e1ec;border-radius:10px;table-layout:fixed"><tr><td style="padding:15px 12px;word-break:keep-all"><div style="font-size:11px;line-height:1.45;font-weight:700;color:#718096;letter-spacing:-.2px">${label}</div><div style="padding-top:7px;font-size:20px;line-height:1.25;font-weight:800;color:${color};word-break:break-all">${value}</div><div style="padding-top:6px;font-size:10px;line-height:1.45;color:#9aa7b7">${note}</div></td></tr></table></td>`;
+  const now = new Date(snapshot?.capturedAt || Date.now()).toLocaleString("ko-KR");
+  const kpiCell = (label, value, color, note) => `<td width="25%" valign="top" style="width:25%;padding:0 5px;box-sizing:border-box"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px;table-layout:fixed"><tr><td style="padding:15px 12px;word-break:keep-all;box-sizing:border-box"><div style="font-size:11px;line-height:1.45;font-weight:700;color:#718096;letter-spacing:-.2px">${label}</div><div style="padding-top:7px;font-size:20px;line-height:1.25;font-weight:800;color:${color};word-break:break-all">${value}</div><div style="padding-top:6px;font-size:10px;line-height:1.45;color:#9aa7b7">${note}</div></td></tr></table></td>`;
   const centerSummaryRows = rows.map((row) => {
     const rowFree = Math.max(row.capacity - row.used, 0);
     const rate = Math.min(percent(row.used, row.capacity), 100);
     return `<tr><td width="110" style="padding:8px 10px 8px 0;font-size:12px;font-weight:800;color:#294d73">${escapeHtml(row.center)}</td><td style="padding:8px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:22px;background:#d8e6df;border-radius:5px;overflow:hidden"><tr><td width="${rate}%" style="background:#356b9f;color:#fff;text-align:center;font-size:10px;font-weight:700">${rate ? `${rate}%` : ""}</td><td width="${Math.max(100 - rate, 0)}%" style="background:#d8e6df"></td></tr></table></td><td width="215" align="right" style="padding:8px 0 8px 12px;font-size:10px;color:#718096">전체 ${formatPlt(row.capacity)} · 사용 ${formatPlt(row.used)} · 여유 <b style="color:#16745a">${formatPlt(rowFree)}</b></td></tr>`;
   }).join("");
-  const detailRows = interactive ? rows : rows.filter((row) => row.center === selectedDetailCenter);
-  const centerCardsBody = detailRows.map((row) => {
-    const rowFree = Math.max(row.capacity - row.used, 0);
-    const rate = percent(row.used, row.capacity);
-    const occupancy = groupedOccupancy(row);
-    const donutUrl = occupancyDonutDataUrl(row, row.center);
-    const legendRows = occupancy.groups.map((group) => `<tr><td width="14" style="padding:3px 0"><span style="display:block;width:10px;height:10px;border-radius:50%;background:${group.color}"></span></td><td style="padding:3px 6px;font-size:11px;font-weight:700;color:#294d73">${escapeHtml(group.name)}</td><td align="right" style="padding:3px 0;font-size:11px;color:#63758a">${formatPlt(group.used)} · ${percent(group.used, occupancy.total)}%</td></tr>`).join("");
-    const otherRows = occupancy.other.length
-      ? occupancy.other.map((shipper) => `<tr><td style="padding:5px 8px 5px 0;border-bottom:1px solid #edf1f5;font-size:10px;line-height:1.45;color:#63758a;word-break:break-all">${escapeHtml(shipper.name)}</td><td width="110" align="right" style="padding:5px 0;border-bottom:1px solid #edf1f5;font-size:10px;font-weight:700;color:#344e69;white-space:nowrap">${formatPlt(shipper.used)}</td></tr>`).join("")
-      : `<tr><td style="font-size:10px;color:#9aa7b7">기타로 분류된 화주 없음</td></tr>`;
-    const inventoryText = row.inventory ? inventoryAgeText(row.inventory) : "재고 미연동";
-    return `<div data-mail-center-panel="${escapeAttr(row.center)}" style="display:${row.center === selectedDetailCenter ? "block" : "none"}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 14px;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:16px 18px"><div style="font-size:17px;line-height:1.4;font-weight:800;color:#12355b;word-break:keep-all">${escapeHtml(row.center)} 화주 CAPA 점유 현황</div><div style="padding-top:4px;font-size:11px;line-height:1.5;color:#8a98a9;word-break:break-all">${escapeHtml(inventoryText)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:11px;background:#f7f9fc;table-layout:fixed"><tr><td width="25%" style="padding:8px 5px;text-align:center;font-size:10px;line-height:1.5;color:#718096">전체<br><b style="font-size:12px;color:#294d73">${formatPlt(row.capacity)}</b></td><td width="25%" style="padding:8px 5px;text-align:center;font-size:10px;line-height:1.5;color:#718096">사용<br><b style="font-size:12px;color:#356b9f">${formatPlt(row.used)}</b></td><td width="25%" style="padding:8px 5px;text-align:center;font-size:10px;line-height:1.5;color:#718096">여유<br><b style="font-size:12px;color:#16745a">${formatPlt(rowFree)}</b></td><td width="25%" style="padding:8px 5px;text-align:center;font-size:10px;line-height:1.5;color:#718096">사용률<br><b style="font-size:12px;color:#294d73">${rate}%</b></td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;table-layout:fixed"><tr><td width="210" valign="top" align="center" style="padding:0 12px 10px 0"><img src="${donutUrl}" width="180" height="180" alt="${escapeAttr(row.center)} 화주 점유 도넛" style="display:block;width:180px;height:180px" /></td><td valign="top" style="padding:4px 0 10px 8px"><div style="padding-bottom:7px;font-size:12px;line-height:1.4;font-weight:800;color:#12355b">화주별 점유 비중</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed">${legendRows || `<tr><td style="font-size:11px;color:#9aa7b7">gaon 재고 미연동</td></tr>`}</table></td></tr><tr><td colspan="2" style="padding-top:4px"><div style="padding:10px 12px;background:#f5f7fa;border:1px solid #e1e7ee;border-radius:8px"><div style="padding-bottom:7px;font-size:11px;line-height:1.5;font-weight:800;color:#53667b">기타 상세 · 사용 CAPA 3% 미만</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed">${otherRows}</table></div></td></tr></table></td></tr></table></div>`;
+  const allShippers = aggregateShippers(rows.flatMap((row) => row.shippers || [])).filter((row) => row.used > 0);
+  const totalShipperUsed = allShippers.reduce((sum, row) => sum + row.used, 0);
+  const topShippers = allShippers.slice(0, 10);
+  const maxShipperUsed = topShippers[0]?.used || 1;
+  const shipperCenters = new Map();
+  rows.forEach((row) => {
+    (row.shippers || []).forEach((shipper) => {
+      if (!shipper.name || number(shipper.used) <= 0) return;
+      if (!shipperCenters.has(shipper.name)) shipperCenters.set(shipper.name, new Set());
+      shipperCenters.get(shipper.name).add(row.center);
+    });
+  });
+  const topShipperRows = topShippers.map((shipper, index) => {
+    const barRate = Math.max(Math.round((shipper.used / maxShipperUsed) * 100), 2);
+    const share = percent(shipper.used, totalShipperUsed);
+    const centers = [...(shipperCenters.get(shipper.name) || [])].join(", ") || "센터 미지정";
+    const rankColor = index < 3 ? "#ffffff" : "#294d73";
+    const rankBackground = index === 0 ? "#12355b" : index === 1 ? "#356b9f" : index === 2 ? "#6f94b8" : "#edf2f7";
+    return `<tr><td width="42" valign="top" style="padding:9px 8px 9px 0"><span style="display:block;width:26px;height:26px;line-height:26px;border-radius:7px;background:${rankBackground};color:${rankColor};text-align:center;font-size:11px;font-weight:800">${index + 1}</span></td><td width="235" valign="top" style="padding:9px 12px 9px 0"><div style="font-size:12px;line-height:1.45;font-weight:800;color:#294d73;word-break:break-all">${escapeHtml(shipper.name)}</div><div style="padding-top:3px;font-size:9px;line-height:1.45;color:#8a98a9;word-break:break-all">${escapeHtml(centers)}</div></td><td valign="middle" style="padding:9px 12px 9px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:18px;background:#e7edf3;border-radius:5px;overflow:hidden"><tr><td width="${barRate}%" style="background:${index < 3 ? "#356b9f" : "#6f94b8"};font-size:1px;line-height:18px">&nbsp;</td><td width="${100 - barRate}%" style="font-size:1px;line-height:18px">&nbsp;</td></tr></table></td><td width="125" align="right" valign="middle" style="padding:9px 0;white-space:nowrap"><div style="font-size:12px;font-weight:800;color:#12355b">${formatPlt(shipper.used)}</div><div style="padding-top:3px;font-size:9px;color:#718096">전체의 ${share}%</div></td></tr>`;
   }).join("");
-  const centerOptions = rows.map((row) => `<option value="${escapeAttr(row.center)}" ${row.center === selectedDetailCenter ? "selected" : ""}>${escapeHtml(row.center)}</option>`).join("");
-  const centerLinks = rows.map((row) => {
-    const active = row.center === selectedDetailCenter;
-    const href = `http://localhost:5180/?center=${encodeURIComponent(row.center)}&occupancy=1`;
-    return `<a href="${escapeAttr(href)}" target="_blank" style="display:inline-block;margin:0 6px 7px 0;padding:8px 11px;border:1px solid ${active ? "#356b9f" : "#cbd7e3"};border-radius:7px;background:${active ? "#356b9f" : "#ffffff"};color:${active ? "#ffffff" : "#294d73"};text-decoration:none;font-size:11px;line-height:1.3;font-weight:800;cursor:pointer">${escapeHtml(row.center)}</a>`;
-  }).join("");
-  const staticCenterSlicer = `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 14px;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:12px 14px"><div style="font-size:12px;line-height:1.4;font-weight:800;color:#12355b">센터 선택 슬라이서</div><div style="padding-top:8px;line-height:1.2">${centerLinks}</div><div style="padding-top:2px;font-size:10px;line-height:1.5;color:#718096">센터 버튼을 누르면 선택한 센터의 화주 CAPA 점유 상세가 대시보드에서 열립니다.</div></td></tr></table>`;
-  const centerCards = interactive
-    ? `<div style="margin:0 0 14px;padding:12px 14px;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><label style="display:block;font-size:12px;font-weight:800;color:#12355b">센터 선택 슬라이서</label><select data-mail-body-center style="margin-top:7px;width:100%;max-width:360px;padding:9px 10px;border:1px solid #cbd7e3;border-radius:7px;background:#ffffff;color:#294d73;font:700 12px Arial,'Malgun Gothic',sans-serif">${centerOptions}</select><div style="padding-top:6px;font-size:10px;color:#718096">센터를 선택하면 아래 화주사 점유 도넛과 상세 데이터가 변경됩니다.</div></div>${centerCardsBody}<script>(function(){var root=document.currentScript.parentElement;var select=root.querySelector('[data-mail-body-center]');if(!select)return;select.addEventListener('change',function(){root.querySelectorAll('[data-mail-center-panel]').forEach(function(panel){panel.style.display=panel.getAttribute('data-mail-center-panel')===select.value?'block':'none';});});})();</script>`
-    : `${staticCenterSlicer}${centerCardsBody}`;
-  return `<div style="margin:0 auto;max-width:1080px;background:#eef3f8;font-family:Arial,'Malgun Gothic',sans-serif;color:#17283d"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#12355b"><tr><td style="padding:22px 26px"><table role="presentation" width="100%"><tr><td width="54"><div style="width:42px;height:42px;line-height:42px;text-align:center;background:#ffffff;color:#12355b;border-radius:9px;font-size:17px;font-weight:900">HX</div></td><td><div style="font-size:24px;font-weight:800;color:#ffffff">센터별 보관 CAPA 현황</div><div style="padding-top:5px;font-size:12px;color:#c9d8e8">한익스프레스 운영 대시보드 · ${now} 기준</div></td><td align="right"><span style="display:inline-block;padding:7px 11px;border:1px solid #52769a;border-radius:15px;font-size:11px;color:#dce9f5">gaon 재고 연동</span></td></tr></table></td></tr></table><div style="padding:18px 18px 24px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${kpiCell("전체 보관 가능 CAPA", formatPlt(totals.capacity), "#12355b", "센터별 수기 입력 합계")}${kpiCell("전체 실사용 CAPA", formatPlt(totals.used), "#356b9f", "gaon 화주 재고 합계")}${kpiCell("전체 여유 CAPA", formatPlt(free), "#16745a", "추가 운영 가능 CAPA")}${kpiCell("평균 사용률", `${totalRate}%`, "#12355b", "전체 센터 통합")}</tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:16px 18px"><table role="presentation" width="100%"><tr><td style="font-size:15px;font-weight:800;color:#12355b">전체 CAPA 구성</td><td align="right" style="font-size:11px;color:#6f7e90"><span style="color:#356b9f">●</span> 사용 ${totalRate}% &nbsp;&nbsp; <span style="color:#b8cec3">●</span> 여유 ${Math.max(100-totalRate,0)}%</td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;height:30px;background:#e5ebf2;border-radius:7px;overflow:hidden"><tr><td width="${Math.min(totalRate,100)}%" style="background:#356b9f;color:#fff;text-align:center;font-size:11px;font-weight:700">${formatPlt(totals.used)}</td><td width="${Math.max(100-totalRate,0)}%" style="background:#d8e6df;color:#245d4a;text-align:center;font-size:11px;font-weight:700">${formatPlt(free)}</td></tr></table></td></tr></table><table role="presentation" width="100%" style="margin:18px 0 9px"><tr><td><div style="font-size:18px;font-weight:800;color:#12355b">전체 센터 요약</div><div style="padding-top:4px;font-size:12px;color:#718096">센터별 전체·사용·여유 CAPA 비교</div></td><td align="right" style="font-size:11px;color:#718096">단위: PLT</td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:10px 18px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${centerSummaryRows}</table></td></tr></table><table role="presentation" width="100%" style="margin:22px 0 9px"><tr><td><div style="font-size:18px;font-weight:800;color:#12355b">선택 센터 점유 화주사 상세</div><div style="padding-top:4px;font-size:12px;color:#718096">${escapeHtml(selectedDetailCenter)} 화주사별 사용 CAPA 구성 · 3% 미만은 기타로 통합</div></td><td align="right" style="font-size:11px;color:#718096">단위: PLT</td></tr></table>${centerCards}<div style="padding:12px 4px 2px;text-align:center;font-size:11px;color:#8290a0">본 메일은 CAPA 대시보드에서 생성된 시점 기준 보고서입니다.</div></div></div>`;
+  const topShipperSection = `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:9px 18px 14px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${topShipperRows || `<tr><td style="padding:24px;text-align:center;font-size:12px;color:#8a98a9">gaon 재고를 연동하면 전체 화주사 보관 CAPA 순위가 표시됩니다.</td></tr>`}</table><div style="margin-top:9px;padding:9px 11px;background:#f5f7fa;border-radius:7px;font-size:10px;line-height:1.5;color:#718096">동일 화주가 여러 센터에 보관 중인 경우 해당 센터의 재고를 합산했습니다. 비중은 전체 화주사 보관 물량 ${formatPlt(totalShipperUsed)} 기준입니다.</div></td></tr></table>`;
+  return `<div style="margin:0 auto;max-width:1080px;background:#eef3f8;font-family:Arial,'Malgun Gothic',sans-serif;color:#17283d"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#12355b"><tr><td style="padding:22px 26px"><table role="presentation" width="100%"><tr><td width="54"><div style="width:42px;height:42px;line-height:42px;text-align:center;background:#ffffff;color:#12355b;border-radius:9px;font-size:17px;font-weight:900">HX</div></td><td><div style="font-size:24px;font-weight:800;color:#ffffff">센터별 보관 CAPA 현황</div><div style="padding-top:5px;font-size:12px;color:#c9d8e8">한익스프레스 운영 대시보드 · ${now} 기준</div></td><td align="right"><span style="display:inline-block;padding:7px 11px;border:1px solid #52769a;border-radius:15px;font-size:11px;color:#dce9f5">${snapshot ? "저장 이력" : "gaon 재고 연동"}</span></td></tr></table></td></tr></table><div style="padding:18px 18px 24px"><table class="dashboard-mail-kpis" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed"><tr>${kpiCell("전체 보관 가능 CAPA", formatPlt(totals.capacity), "#12355b", "센터별 수기 입력 합계")}${kpiCell("전체 실사용 CAPA", formatPlt(totals.used), "#356b9f", "gaon 화주 재고 합계")}${kpiCell("전체 여유 CAPA", formatPlt(free), "#16745a", "추가 운영 가능 CAPA")}${kpiCell("평균 사용률", `${totalRate}%`, "#12355b", "전체 센터 통합")}</tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:16px 18px"><table role="presentation" width="100%"><tr><td style="font-size:15px;font-weight:800;color:#12355b">전체 CAPA 구성</td><td align="right" style="font-size:11px;color:#6f7e90"><span style="color:#356b9f">●</span> 사용 ${totalRate}% &nbsp;&nbsp; <span style="color:#b8cec3">●</span> 여유 ${Math.max(100-totalRate,0)}%</td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;height:30px;background:#e5ebf2;border-radius:7px;overflow:hidden"><tr><td width="${Math.min(totalRate,100)}%" style="background:#356b9f;color:#fff;text-align:center;font-size:11px;font-weight:700">${formatPlt(totals.used)}</td><td width="${Math.max(100-totalRate,0)}%" style="background:#d8e6df;color:#245d4a;text-align:center;font-size:11px;font-weight:700">${formatPlt(free)}</td></tr></table></td></tr></table><table role="presentation" width="100%" style="margin:18px 0 9px"><tr><td><div style="font-size:18px;font-weight:800;color:#12355b">전체 센터 요약</div><div style="padding-top:4px;font-size:12px;color:#718096">센터별 전체·사용·여유 CAPA 비교</div></td><td align="right" style="font-size:11px;color:#718096">단위: PLT</td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #d7e1ec;border-radius:10px"><tr><td style="padding:10px 18px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${centerSummaryRows}</table></td></tr></table><table role="presentation" width="100%" style="margin:22px 0 9px"><tr><td><div style="font-size:18px;font-weight:800;color:#12355b">전체 화주사 보관 CAPA TOP 10</div><div style="padding-top:4px;font-size:12px;color:#718096">전 센터 gaon 재고 합산 · 보관 물량이 많은 화주사 순</div></td><td align="right" style="font-size:11px;color:#718096">단위: PLT</td></tr></table>${topShipperSection}<div style="padding:12px 4px 2px;text-align:center;font-size:11px;color:#8290a0">${snapshot ? "저장된 시점의 CAPA 누적 이력입니다." : "본 메일은 CAPA 대시보드에서 생성된 시점 기준 보고서입니다."}</div></div></div>`;
 }
 
-function dashboardLauncherHtml() {
-  const dashboardUrl = "https://hanex-capa-dashboard.vercel.app/";
-  return `<main style="min-height:70vh;display:grid;place-items:center;font-family:Arial,'Malgun Gothic',sans-serif;color:#17283d"><section style="width:min(520px,calc(100% - 32px));padding:34px;text-align:center;background:#ffffff;border:1px solid #d7e1ec;border-radius:14px;box-shadow:0 16px 42px rgba(18,53,91,.14)"><div style="margin:0 auto 18px;width:52px;height:52px;line-height:52px;border-radius:11px;background:#12355b;color:#ffffff;font-size:20px;font-weight:900">HX</div><h1 style="margin:0;color:#12355b;font-size:24px">센터 CAPA 대시보드</h1><p style="margin:12px 0 22px;color:#718096;font-size:13px;line-height:1.7">대시보드로 이동하고 있습니다.<br>자동으로 열리지 않으면 아래 버튼을 눌러주세요.</p><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#356b9f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800">대시보드 열기</a><p style="margin:18px 0 0;color:#9aa7b7;font-size:10px">${escapeHtml(dashboardUrl)}</p></section></main><script>window.location.replace(${JSON.stringify(dashboardUrl)});</script>`;
+function dashboardOfflineReportHtml(snapshot) {
+  const centers = snapshot?.centers || [];
+  const selectorCss = centers.map((_, index) => `
+    #offline-center-${index}:checked ~ .offline-center-tabs label[for="offline-center-${index}"]{background:#12355b;color:#fff;border-color:#12355b}
+    #offline-center-${index}:checked ~ .offline-center-panels [data-offline-panel="${index}"]{display:block}
+  `).join("");
+  const radios = centers.map((_, index) => `<input class="offline-center-radio" type="radio" name="offline-center" id="offline-center-${index}" ${index === 0 ? "checked" : ""}>`).join("");
+  const tabs = centers.map((row, index) => `<label for="offline-center-${index}">${escapeHtml(row.center)}</label>`).join("");
+  const panels = centers.map((row, index) => {
+    const capacity = number(row.capacity);
+    const used = number(row.used);
+    const free = Math.max(capacity - used, 0);
+    const rate = percent(used, capacity);
+    const shippers = aggregateShippers(row.shippers || []).filter((shipper) => shipper.used > 0);
+    const shipperRows = shippers.map((shipper, shipperIndex) => {
+      const share = percent(shipper.used, used);
+      return `<div class="offline-shipper-row"><b>${shipperIndex + 1}</b><strong>${escapeHtml(shipper.name)}</strong><div class="offline-bar"><i style="width:${Math.max(share, 1)}%"></i></div><span>${formatPlt(shipper.used)} <small>${share}%</small></span></div>`;
+    }).join("") || `<div class="offline-empty">등록된 화주사 재고가 없습니다.</div>`;
+    return `<article class="offline-center-panel" data-offline-panel="${index}">
+      <header><div><span>센터별 상세</span><h2>${escapeHtml(row.center)}</h2></div><em>발송 기준 ${new Date(snapshot.capturedAt).toLocaleString("ko-KR")}</em></header>
+      <div class="offline-kpis"><div><span>전체 CAPA</span><strong>${formatPlt(capacity)}</strong></div><div><span>사용 CAPA</span><strong>${formatPlt(used)}</strong></div><div><span>여유 CAPA</span><strong>${formatPlt(free)}</strong></div><div><span>사용률</span><strong>${rate}%</strong></div></div>
+      <div class="offline-capa-track"><i style="width:${Math.min(rate, 100)}%"></i></div>
+      <div class="offline-list-head"><strong>점유 화주 전체 내역</strong><span>${shippers.length}개 화주 · 사용 CAPA 기준 점유율</span></div>
+      <div class="offline-shipper-list">${shipperRows}</div>
+    </article>`;
+  }).join("");
+  return `<style>
+    *{box-sizing:border-box}.offline-report{max-width:1180px;margin:0 auto;font-family:Arial,'Malgun Gothic',sans-serif;color:#17283d}.offline-center-detail{margin:24px auto 0;max-width:1080px;padding:20px;background:#eef3f8;border:1px solid #d7e1ec;border-radius:12px}.offline-center-detail>h1{margin:0;color:#12355b;font-size:22px}.offline-center-detail>p{margin:7px 0 16px;color:#718096;font-size:12px}.offline-center-radio{position:absolute;opacity:0;pointer-events:none}.offline-center-tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}.offline-center-tabs label{padding:9px 13px;border:1px solid #cbd7e4;border-radius:7px;background:#fff;color:#294d73;font-size:12px;font-weight:800;cursor:pointer}.offline-center-panel{display:none;padding:20px;background:#fff;border:1px solid #d7e1ec;border-radius:10px}.offline-center-panel header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:14px;border-bottom:1px solid #e1e8f0}.offline-center-panel header span{font-size:11px;color:#718096}.offline-center-panel h2{margin:4px 0 0;color:#12355b;font-size:22px}.offline-center-panel header em{font-style:normal;color:#718096;font-size:11px}.offline-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:14px 0}.offline-kpis div{padding:13px;border:1px solid #d7e1ec;border-radius:8px;background:#f9fbfd}.offline-kpis span{display:block;color:#718096;font-size:11px;font-weight:700}.offline-kpis strong{display:block;margin-top:6px;color:#12355b;font-size:18px;white-space:nowrap}.offline-capa-track{height:14px;overflow:hidden;border-radius:7px;background:#d8e6df}.offline-capa-track i{display:block;height:100%;background:#356b9f}.offline-list-head{display:flex;justify-content:space-between;gap:12px;margin:20px 0 8px;color:#12355b}.offline-list-head span{color:#718096;font-size:11px}.offline-shipper-list{border-top:1px solid #d7e1ec}.offline-shipper-row{display:grid;grid-template-columns:34px minmax(150px,240px) minmax(180px,1fr) 140px;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #edf1f5;font-size:12px}.offline-shipper-row>b{color:#718096;text-align:center}.offline-shipper-row>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#294d73}.offline-shipper-row>span{text-align:right;font-weight:800;color:#12355b;white-space:nowrap}.offline-shipper-row small{color:#718096}.offline-bar{height:14px;overflow:hidden;border-radius:7px;background:#e7edf3}.offline-bar i{display:block;height:100%;background:linear-gradient(90deg,#356b9f,#75a0c7)}.offline-empty{padding:28px;text-align:center;color:#718096}.offline-security{margin-top:12px;padding:10px;border-radius:7px;background:#fff9e8;color:#785f20;font-size:11px;line-height:1.5}${selectorCss}
+    @media(max-width:700px){.offline-kpis{grid-template-columns:repeat(2,1fr)}.offline-shipper-row{grid-template-columns:28px minmax(110px,1fr) 105px}.offline-shipper-row .offline-bar{display:none}.offline-center-panel{padding:13px}.offline-center-panel header{align-items:flex-start;flex-direction:column}}
+    @media print{.offline-center-tabs{display:none}.offline-center-panel{display:block!important;margin-bottom:18px;break-inside:avoid}.offline-security{display:none}}
+  </style><div class="offline-report">${dashboardMailHtml(snapshot)}<section class="offline-center-detail"><h1>센터별 화주 점유 상세</h1><p>센터 탭을 선택하면 해당 센터의 전체 화주사 CAPA 점유 내역을 확인할 수 있습니다.</p>${radios}<div class="offline-center-tabs">${tabs}</div><div class="offline-center-panels">${panels}</div><div class="offline-security">이 파일에는 GAON 로그인 정보와 재고 셀 위치가 포함되지 않습니다. 발송 시점의 센터·화주별 CAPA 합계만 포함합니다.</div></section></div>`;
 }
 
 function renderMailingModal() {
   const list = $("#mailRecipientList");
   list.innerHTML = (state.mailRecipients || []).map((recipient, index) => `<label class="mail-recipient-row"><input type="checkbox" data-mail-pick="${index}" checked><span><strong>${escapeHtml(recipient.name || recipient.email)}</strong><small>${escapeHtml(recipient.email)}</small></span><button class="ghost mini" data-mail-remove="${index}" type="button">삭제</button></label>`).join("") || `<div class="empty">수신 메일 주소를 추가하세요.</div>`;
   if (!state.centers.includes(mailingSelectedCenter)) mailingSelectedCenter = state.centers[0];
-  $("#mailPreview").innerHTML = dashboardMailHtml(mailingSelectedCenter, true);
+  $("#mailPreview").innerHTML = dashboardMailHtml();
   if (!$("#mailSubject").value) $("#mailSubject").value = `[CAPA 현황] ${new Date().toLocaleDateString("ko-KR")} 센터별 보고`;
 }
 
@@ -2590,6 +3018,10 @@ function renderCenterManager() {
             <strong>${center}</strong>
             <span>${formatPlt(item.capacity)} / 사용률 ${percent(item.used, item.capacity)}%</span>
           </div>
+          <label class="center-wms-code">GAON 센터코드
+            <input type="text" value="${escapeAttr(centerWmsCode(center))}" data-center-wms-input="${escapeAttr(center)}" placeholder="예: 0000200" maxlength="30" autocomplete="off" />
+          </label>
+          <button class="ghost small save-center-wms" data-center="${escapeAttr(center)}" type="button">코드 저장</button>
           <button class="danger remove-center" data-center="${center}" type="button">삭제</button>
         </div>
       `;
@@ -2607,12 +3039,113 @@ function renderCenterManager() {
       delete state.centerShipperMap[button.dataset.center];
       delete state.hiddenMappedShippers[button.dataset.center];
       delete state.centerInfo[button.dataset.center];
+      delete state.centerWmsCodes[button.dataset.center];
       selectedCenter = state.centers[0];
       selectedZoneId = null;
       saveState();
       renderAll();
     });
   });
+  document.querySelectorAll(".save-center-wms").forEach((button) => {
+    button.addEventListener("click", () => saveCenterWmsCode(button.dataset.center));
+  });
+  document.querySelectorAll("[data-center-wms-input]").forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      saveCenterWmsCode(input.dataset.centerWmsInput);
+    });
+  });
+}
+
+function saveCenterWmsCode(center) {
+  const input = [...document.querySelectorAll("[data-center-wms-input]")].find((item) => item.dataset.centerWmsInput === center);
+  if (!input) return;
+  const code = input.value.trim();
+  if (code && !/^[A-Za-z0-9_-]{1,30}$/.test(code)) {
+    alert("GAON 센터코드는 영문, 숫자, 하이픈(-), 밑줄(_)만 입력해 주세요.");
+    input.focus();
+    return;
+  }
+  if (!state.centerWmsCodes) state.centerWmsCodes = {};
+  if (code) state.centerWmsCodes[center] = code;
+  else delete state.centerWmsCodes[center];
+  saveState();
+  input.value = code;
+  const button = [...document.querySelectorAll(".save-center-wms")].find((item) => item.dataset.center === center);
+  if (button) {
+    button.textContent = "저장 완료";
+    window.setTimeout(() => { button.textContent = "코드 저장"; }, 1200);
+  }
+  if ($("#gaonModal")?.classList.contains("open") && twinActiveCenter() === center) {
+    $("#gaonWarehouse").value = code;
+  }
+}
+
+function renderFloorplanMaster() {
+  const centerSelect = $("#floorplanMasterCenter");
+  const floorSelect = $("#floorplanMasterFloor");
+  const card = $("#floorplanMasterCard");
+  if (!centerSelect || !floorSelect || !card) return;
+  if (!state.centers.includes(floorplanMasterCenter)) floorplanMasterCenter = state.centers[0];
+  const floors = getCenterFloors(floorplanMasterCenter);
+  if (!floors.includes(floorplanMasterFloor)) floorplanMasterFloor = floors[0];
+  centerSelect.innerHTML = state.centers.map((center) => `<option value="${escapeAttr(center)}" ${center === floorplanMasterCenter ? "selected" : ""}>${escapeHtml(center)}</option>`).join("");
+  floorSelect.innerHTML = floors.map((floor) => `<option value="${escapeAttr(floor)}" ${floor === floorplanMasterFloor ? "selected" : ""}>${escapeHtml(floor)}</option>`).join("");
+  const image = getFloorplan(floorplanMasterCenter, floorplanMasterFloor).image || "";
+  const embedded = embeddedFloorplanImage(image);
+  const stored = /^\/api\/floorplan\/file\//.test(image);
+  const label = stored ? "로컬 파일 저장" : embedded ? "브라우저 저장형 · 파일 전환 권장" : image ? "기본 내장 도면" : "미등록";
+  const tone = stored ? "stored" : embedded ? "embedded" : "default";
+  card.innerHTML = `
+    <div class="floorplan-master-preview">
+      ${image ? `<img src="${escapeAttr(image)}" alt="${escapeAttr(floorplanMasterCenter)} ${escapeAttr(floorplanMasterFloor)} 도면" />` : `<div class="empty">등록된 도면이 없습니다.</div>`}
+    </div>
+    <div class="floorplan-master-meta">
+      <span class="floorplan-storage-badge ${tone}">${label}</span>
+      <strong>${escapeHtml(floorplanMasterCenter)} · ${escapeHtml(floorplanMasterFloor)}</strong>
+      <p>${stored ? "도면 파일은 이 PC의 CAPA 데이터 폴더에 보관되고 화면에는 짧은 주소만 저장됩니다." : embedded ? "현재 도면 이미지가 브라우저 상태에 포함되어 있습니다. 아래 전환 버튼을 누르면 용량을 줄일 수 있습니다." : image ? "프로그램에 포함된 기본 도면입니다. 새 도면을 등록하면 로컬 파일 방식으로 교체됩니다." : "PDF 또는 이미지 파일을 등록해 주세요."}</p>
+    </div>`;
+  const migrate = $("#floorplanMasterMigrate");
+  if (migrate) migrate.hidden = !embedded;
+}
+
+async function handleFloorplanMasterUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const status = $("#floorplanMasterStatus");
+  status.textContent = "도면을 변환하고 로컬 파일로 저장하고 있습니다…";
+  status.className = "save-status dirty";
+  try {
+    const data = await uploadFloorplanFile(file, floorplanMasterCenter, floorplanMasterFloor);
+    status.textContent = `저장 완료 · ${(data.bytes / 1024).toFixed(0)}KB · 브라우저 용량 미사용`;
+    status.className = "save-status saved";
+    renderFloorplanMaster();
+    renderTwinPhoto();
+    renderRackEditor();
+  } catch (error) {
+    status.textContent = `저장 실패 · ${error.message}`;
+    status.className = "save-status error";
+  } finally {
+    event.target.value = "";
+  }
+}
+
+async function migrateFloorplanMasterImage() {
+  const plan = getFloorplan(floorplanMasterCenter, floorplanMasterFloor);
+  if (!embeddedFloorplanImage(plan.image)) return;
+  const status = $("#floorplanMasterStatus");
+  status.textContent = "기존 도면을 로컬 파일 저장 방식으로 전환하고 있습니다…";
+  status.className = "save-status dirty";
+  try {
+    const data = await saveFloorplanAsset(floorplanMasterCenter, floorplanMasterFloor, plan.image);
+    status.textContent = `전환 완료 · ${(data.bytes / 1024).toFixed(0)}KB · 브라우저 저장공간 확보`;
+    status.className = "save-status saved";
+    renderFloorplanMaster();
+  } catch (error) {
+    status.textContent = `전환 실패 · ${error.message}`;
+    status.className = "save-status error";
+  }
 }
 
 function renderShipperMasterManager() {
@@ -3123,15 +3656,67 @@ function bindEvents() {
   $("#centerOccupancyClose")?.addEventListener("click", closeCenterOccupancyModal);
   $("#centerOccupancyBackdrop")?.addEventListener("click", closeCenterOccupancyModal);
   $("#openMailingButton")?.addEventListener("click", openMailingModal);
-  $("#mailPreview")?.addEventListener("change", (event) => {
-    const slicer = event.target.closest("[data-mail-body-center]");
-    if (!slicer) return;
-    mailingSelectedCenter = slicer.value;
-    $("#mailPreview").innerHTML = dashboardMailHtml(mailingSelectedCenter, true);
-    $("#mailingStatus").textContent = `${mailingSelectedCenter} 상세를 메일 본문 기본 화면과 HTML 보고서에 반영합니다.`;
+  $("#captureCapaSnapshot")?.addEventListener("click", async () => {
+    const status = $("#historySaveStatus");
+    const button = $("#captureCapaSnapshot");
+    button.disabled = true;
+    status.textContent = "서버에 저장 중…";
+    status.className = "save-status dirty";
+    try {
+      const saved = await captureCapaSnapshot("manual", "누적 관리에서 저장");
+      status.textContent = saved.replaced ? "오늘 현황 갱신 완료" : "현재 현황 저장 완료";
+      status.className = "save-status saved";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "save-status error";
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#historyUnit")?.addEventListener("change", (event) => {
+    historyUnit = event.target.value;
+    historyLeftKey = "";
+    historyRightKey = "";
+    renderHistoryManagement();
+  });
+  $("#historyLeft")?.addEventListener("change", (event) => {
+    historyLeftKey = event.target.value;
+    renderHistoryManagement();
+  });
+  $("#historyRight")?.addEventListener("change", (event) => {
+    historyRightKey = event.target.value;
+    renderHistoryManagement();
+  });
+  $("#snapshotList")?.addEventListener("click", async (event) => {
+    const viewButton = event.target.closest("[data-snapshot-view]");
+    if (viewButton) {
+      openHistorySnapshot(viewButton.dataset.snapshotView);
+      return;
+    }
+    const button = event.target.closest("[data-snapshot-remove]");
+    if (!button) return;
+    const snapshot = state.capaSnapshots.find((item) => item.id === button.dataset.snapshotRemove);
+    if (!snapshot || !window.confirm(`${snapshot.businessDate} CAPA 저장 이력을 삭제할까요?`)) return;
+    button.disabled = true;
+    try {
+      await deleteCapaSnapshot(snapshot);
+      historyLeftKey = "";
+      historyRightKey = "";
+      renderHistoryManagement();
+    } catch (error) {
+      alert(`저장 이력 삭제 실패: ${error.message}`);
+      button.disabled = false;
+    }
   });
   $("#mailingClose")?.addEventListener("click", closeMailingModal);
   $("#mailingBackdrop")?.addEventListener("click", closeMailingModal);
+  $("#historySnapshotClose")?.addEventListener("click", closeHistorySnapshot);
+  $("#historySnapshotBackdrop")?.addEventListener("click", closeHistorySnapshot);
+  $("#historySnapshotFullscreen")?.addEventListener("click", () => {
+    if (document.fullscreenElement) exitHistorySnapshotFullscreen();
+    else requestHistorySnapshotFullscreen();
+  });
+  document.addEventListener("fullscreenchange", syncHistorySnapshotFullscreenButton);
   $("#mailRecipientForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const email = $("#mailRecipientEmail").value.trim();
@@ -3182,6 +3767,7 @@ function bindEvents() {
     button.textContent = "전송 중…";
     $("#mailingStatus").textContent = `${recipients.length}명에게 메일을 전송하고 있습니다.`;
     try {
+      const mailSnapshot = createCapaSnapshot("mail", "메일 첨부 대시보드");
       const response = await fetch("/api/mail/send", {
         method: "POST",
         headers: {
@@ -3191,14 +3777,19 @@ function bindEvents() {
         body: JSON.stringify({
           to: recipients.map((recipient) => recipient.email),
           subject: $("#mailSubject").value.trim(),
-          html: dashboardMailHtml(mailingSelectedCenter, false),
-          attachmentHtml: dashboardLauncherHtml(),
-          attachmentName: `센터_CAPA_대시보드_바로가기_${new Date().toISOString().slice(0, 10)}.html`,
+          html: dashboardMailHtml(mailSnapshot),
+          attachmentHtml: dashboardOfflineReportHtml(mailSnapshot),
+          attachmentName: `센터_CAPA_상세대시보드_${new Date().toISOString().slice(0, 10)}.html`,
         }),
       });
       const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
       if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
-      $("#mailingStatus").textContent = `전송 완료 · ${data.sent}명 · 발신 ${data.sender} · 첨부 ${data.attachment}`;
+      try {
+        const saved = await captureCapaSnapshot("mail", `${data.sent}명 발송`);
+        $("#mailingStatus").textContent = `전송 완료 · ${data.sent}명 · 누적 ${saved.replaced ? "당일 갱신" : "신규 저장"} · 발신 ${data.sender} · 첨부 ${data.attachment}`;
+      } catch (snapshotError) {
+        $("#mailingStatus").textContent = `전송 완료 · ${data.sent}명 · 누적 저장 실패: ${snapshotError.message}`;
+      }
     } catch (error) {
       $("#mailingStatus").textContent = `전송 실패 · ${error.message}`;
     } finally {
@@ -3207,7 +3798,7 @@ function bindEvents() {
     }
   });
   $("#copyMailHtml")?.addEventListener("click", async () => {
-    const html = dashboardMailHtml(mailingSelectedCenter, false);
+    const html = dashboardMailHtml();
     const plain = $("#mailPreview").innerText;
     try {
       if (window.ClipboardItem && navigator.clipboard?.write) {
@@ -3221,11 +3812,12 @@ function bindEvents() {
     }
   });
   $("#downloadMailHtml")?.addEventListener("click", () => {
-    const blob = new Blob([`<!doctype html><html lang="ko"><meta charset="utf-8"><title>${escapeHtml($("#mailSubject").value)}</title><body style="margin:24px;background:#eef3f8">${dashboardMailHtml(mailingSelectedCenter, true)}</body></html>`], { type: "text/html;charset=utf-8" });
+    const snapshot = createCapaSnapshot("manual", "HTML 상세 보고서");
+    const blob = new Blob([`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml($("#mailSubject").value)}</title><body style="margin:0;padding:24px;background:#eef3f8">${dashboardOfflineReportHtml(snapshot)}</body></html>`], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `센터_CAPA_보고_${new Date().toISOString().slice(0, 10)}.html`;
+    link.download = `센터_CAPA_상세대시보드_${new Date().toISOString().slice(0, 10)}.html`;
     link.click();
     URL.revokeObjectURL(url);
     $("#mailingStatus").textContent = "HTML 보고서를 저장했습니다.";
@@ -3297,6 +3889,7 @@ function bindEvents() {
     state.centers.push(name);
     state.centerShipperMap[name] = [];
     state.hiddenMappedShippers[name] = [];
+    state.centerWmsCodes[name] = "";
     state.centerInfo[name] = defaultCenterInfo(name);
     state.centerFloors[name] = ["1F"];
     selectedCenter = name;
@@ -3305,6 +3898,17 @@ function bindEvents() {
     saveState();
     renderAll();
   });
+  $("#floorplanMasterCenter")?.addEventListener("change", (event) => {
+    floorplanMasterCenter = event.target.value;
+    floorplanMasterFloor = getCenterFloors(floorplanMasterCenter)[0];
+    renderFloorplanMaster();
+  });
+  $("#floorplanMasterFloor")?.addEventListener("change", (event) => {
+    floorplanMasterFloor = event.target.value;
+    renderFloorplanMaster();
+  });
+  $("#floorplanMasterUpload")?.addEventListener("change", handleFloorplanMasterUpload);
+  $("#floorplanMasterMigrate")?.addEventListener("click", migrateFloorplanMasterImage);
   $("#addMasterShipperForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = $("#newMasterShipperName").value.trim();
@@ -3421,6 +4025,7 @@ function bindEvents() {
     if (event.key === "Escape") {
       closeFreeCapaModal();
       closeMappingModal();
+      closeHistorySnapshot();
     }
   });
   window.addEventListener("pointerup", () => {
@@ -3428,7 +4033,9 @@ function bindEvents() {
     isPaintingCells = false;
   });
   $("#resetDemoButton").addEventListener("click", () => {
+    const snapshots = state.capaSnapshots.slice();
     state = structuredClone(defaultState);
+    state.capaSnapshots = snapshots;
     selectedCenter = state.centers[0];
     selectedFloor = getCenterFloors(selectedCenter)[0];
     selectedCategory = { major: "보관공간", minor: "일반" };
@@ -3456,11 +4063,10 @@ function handleWmsUpload(event) {
 function handleFloorplanUpload(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  fileToFloorplanImage(file)
-    .then((image) => {
-      getFloorplan(selectedCenter, selectedFloor).image = image;
-      saveState();
+  uploadFloorplanFile(file, selectedCenter, selectedFloor)
+    .then(() => {
       renderFloorplan();
+      renderFloorplanMaster();
     })
     .catch((err) => alert("도면 변환 실패: " + err.message));
   event.target.value = "";
@@ -3616,7 +4222,9 @@ function renderAll() {
   renderDashboard();
   renderEntry();
   renderShipperAnalysis();
+  renderHistoryManagement();
   renderCenterManager();
+  renderFloorplanMaster();
   renderShipperMasterManager();
   renderCenterInfoManager();
   renderCategoryManager();
@@ -5308,10 +5916,9 @@ function renderInventoryStatus() {
 }
 
 // ── gaon(WMS) 재고 직접 연동 — server/serve.py 중계 서버가 켜져 있을 때 사용
-// 센터 → WMS 창고코드. 확인된 것만 채우고, 없으면 입력받아 저장한다.
-const CENTER_WMS_CODE = { 남이천1센터: "0000200" };
+// 센터 마스터에서 관리하는 GAON WMS 창고코드.
 function centerWmsCode(center) {
-  return (state.centerWmsCodes && state.centerWmsCodes[center]) || CENTER_WMS_CODE[center] || "";
+  return String(state.centerWmsCodes?.[center] || "").trim();
 }
 // 센터별 gaon 화주 목록 — 코드+이름을 저장해두고 개별/일괄 조회에 사용
 function gaonShipperList(center) {
@@ -5498,11 +6105,8 @@ async function gaonLoginFromModal() {
 // 모달의 조회 조건을 state에 반영하고 유효성만 확인한다
 function gaonReadForm() {
   const center = twinActiveCenter();
-  const wh = ($("#gaonWarehouse").value || "").trim();
-  if (wh) {
-    if (!state.centerWmsCodes) state.centerWmsCodes = {};
-    state.centerWmsCodes[center] = wh;
-  }
+  const wh = centerWmsCode(center);
+  $("#gaonWarehouse").value = wh;
   const ymd = ($("#gaonDate").value || "").replace(/-/g, "");
   return { center, warehouse: wh, ymd, targets: gaonSelectedShippers(center) };
 }
@@ -5561,6 +6165,8 @@ async function runGaonFetch(opts) {
       }
       // 세션이 끊겼으면 로그인 화면으로 되돌린다 (prompt 대신)
       if (!data.ok && data.needLogin) {
+        gaonCredentials = null;
+        gaonLoggedIn = false;
         await refreshGaonConnection();
         throw new Error("gaon 로그인이 필요합니다. 위에서 로그인 후 다시 실행하세요.");
       }
@@ -5658,8 +6264,7 @@ async function gaonRunTargetsFromModal(targets) {
   const opts = gaonReadForm();
   opts.targets = targets;
   if (!opts.warehouse) {
-    gaonMsg("WMS 창고코드를 입력하세요 (예: 0000200).", "err");
-    $("#gaonWarehouse").focus();
+    gaonMsg("마스터 관리에서 이 센터의 GAON 센터코드를 먼저 등록하세요.", "err");
     return;
   }
   if (!opts.ymd) {
@@ -5695,7 +6300,7 @@ async function fetchGaonInventory() {
   const targets = gaonSelectedShippers(center);
   if (!wh || !targets.length) {
     openGaonModal();
-    gaonMsg(!wh ? "이 센터의 WMS 창고코드를 먼저 입력하세요." : "조회할 화주를 먼저 등록·선택하세요.", "warn");
+    gaonMsg(!wh ? "마스터 관리에서 이 센터의 GAON 센터코드를 먼저 등록하세요." : "조회할 화주를 먼저 등록·선택하세요.", "warn");
     return;
   }
   const status = $("#inventoryStatus");
@@ -5738,7 +6343,6 @@ function bindGaonModal() {
     await refreshGaonConnection();
     gaonMsg("로그아웃했습니다.");
   });
-  $("#gaonWarehouse").addEventListener("change", () => gaonReadForm());
   $("#gaonShipperList").addEventListener("click", async (event) => {
     const button = event.target.closest(".gaon-run-one");
     if (!button) return;
@@ -6995,12 +7599,11 @@ function uploadRackFloorplan(event) {
   if (!file) return;
   const empty = $("#rackEditorEmpty");
   if (empty) empty.textContent = "도면 변환 중…";
-  fileToFloorplanImage(file)
-    .then((image) => {
-      getFloorplan(twinActiveCenter(), twinActiveFloor()).image = image;
-      saveState();
+  uploadFloorplanFile(file, twinActiveCenter(), twinActiveFloor())
+    .then(() => {
       renderRackEditor();
       renderFloorplan?.();
+      renderFloorplanMaster();
     })
     .catch((err) => alert("도면 변환 실패: " + err.message));
   event.target.value = "";
@@ -7641,6 +8244,7 @@ document.addEventListener("keydown", (e) => {
 });
 applySidebarCollapsed();
 renderAll();
+loadCapaHistoryFromServer();
 if (launchParams.get("occupancy") === "1" && state.centers.includes(selectedCenter)) {
   window.setTimeout(() => openCenterOccupancyModal(selectedCenter), 0);
 }
